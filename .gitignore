@@ -1,0 +1,14 @@
+zig-cache/
+zig-out/
+*.db
+*.wal
+*.o
+*.a
+*.so
+*.dylib
+.DS_Store
+.zig-cache/
+zig-out/
+*.db
+test_*
+bench_*_data/

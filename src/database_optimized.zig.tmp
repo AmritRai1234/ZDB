@@ -1,0 +1,130 @@
+    /// Retrieve a value by key (with caching)
+    pub fn get(self: *Database, key: []const u8, allocator: Allocator) ![]u8 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        
+        self.total_reads += 1;
+        
+        // Check cache first
+        var cache_key: [256]u8 = undefined;
+        if (key.len <= 256) {
+            @memset(&cache_key, 0);
+            @memcpy(cache_key[0..key.len], key);
+            
+            if (self.cache.get(cache_key)) |cached_value| {
+                // Cache hit - return copy
+                const value_copy = try allocator.alloc(u8, cached_value.len);
+                @memcpy(value_copy, cached_value);
+                return value_copy;
+            }
+        }
+        
+        // Cache miss - read from disk
+        const entry = self.index.get(key) orelse return error.NotFound;
+        
+        const wal_file = self.wal orelse return error.Corruption;
+        try wal_file.seekTo(entry.offset);
+        
+        var header: RecordHeader = undefined;
+        const bytes_read = try wal_file.read(std.mem.asBytes(&header));
+        if (bytes_read != @sizeOf(RecordHeader)) return error.Corruption;
+        
+        const key_buf = try allocator.alloc(u8, header.key_len);
+        defer allocator.free(key_buf);
+        _ = try wal_file.read(key_buf);
+        
+        var value = try allocator.alloc(u8, header.value_len);
+        errdefer allocator.free(value);
+        
+        const value_bytes_read = try wal_file.read(value);
+        if (value_bytes_read != header.value_len) {
+            return error.Corruption;
+        }
+        
+        // Decompress if needed
+        var final_value = value;
+        if (entry.compressed) {
+            const decompressed = try decompress(allocator, value, header.original_len);
+            allocator.free(value);
+            final_value = decompressed;
+        }
+        
+        // Update cache (store copy)
+        if (key.len <= 256 and final_value.len <= 4096) { // Cache values up to 4KB
+            const cache_value = try self.allocator.alloc(u8, final_value.len);
+            @memcpy(cache_value, final_value);
+            self.cache.put(cache_key, cache_value) catch {}; // Ignore cache errors
+        }
+        
+        return final_value;
+    }
+    
+    /// Store a key-value pair (with compression)
+    pub fn put(self: *Database, key: []const u8, value: []const u8) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        
+        self.total_writes += 1;
+        
+        const wal_file = self.wal orelse return error.NotInitialized;
+        const offset = try wal_file.getEndPos();
+        
+        // Try compression for values > 256 bytes
+        var compressed_value: ?[]u8 = null;
+        var should_compress = false;
+        if (self.config.compression and value.len > 256) {
+            compressed_value = compress(self.allocator, value, .default) catch null;
+            if (compressed_value) |cv| {
+                // Only use if compression saves at least 10%
+                if (cv.len < value.len * 9 / 10) {
+                    should_compress = true;
+                    self.bytes_compressed += cv.len;
+                    self.bytes_uncompressed += value.len;
+                } else {
+                    self.allocator.free(cv);
+                    compressed_value = null;
+                }
+            }
+        }
+        
+        const final_value = if (should_compress) compressed_value.? else value;
+        defer if (should_compress) self.allocator.free(compressed_value.?);
+        
+        // Write record
+        const header = RecordHeader{
+            .magic = MAGIC,
+            .key_len = @intCast(key.len),
+            .value_len = @intCast(final_value.len),
+            .original_len = if (should_compress) @intCast(value.len) else 0,
+            .timestamp = std.time.milliTimestamp(),
+        };
+        
+        try wal_file.writeAll(std.mem.asBytes(&header));
+        try wal_file.writeAll(key);
+        try wal_file.writeAll(final_value);
+        
+        if (self.config.sync_mode == .full) {
+            try wal_file.sync();
+        }
+        
+        // Update index
+        const key_copy = try self.allocator.alloc(u8, key.len);
+        @memcpy(key_copy, key);
+        
+        try self.index.put(key_copy, .{
+            .offset = offset,
+            .size = @intCast(final_value.len),
+            .compressed = should_compress,
+        });
+        
+        // Update cache
+        var cache_key: [256]u8 = undefined;
+        if (key.len <= 256 and value.len <= 4096) {
+            @memset(&cache_key, 0);
+            @memcpy(cache_key[0..key.len], key);
+            
+            const cache_value = try self.allocator.alloc(u8, value.len);
+            @memcpy(cache_value, value);
+            self.cache.put(cache_key, cache_value) catch {}; // Ignore cache errors
+        }
+    }
