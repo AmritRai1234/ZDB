@@ -55,6 +55,60 @@ zig build bench-battery
 ./build_ios.sh
 ```
 
+## 🌐 Browser Usage (WebAssembly)
+
+ZMDB now runs in web browsers via WebAssembly!
+
+```bash
+# Build WASM module
+zig build build-wasm
+
+# Start demo server
+python3 serve.py
+
+# Open http://localhost:8080/wasm/
+```
+
+### JavaScript API
+
+```javascript
+// Load and initialize
+const db = await ZMDB.load('./zmdb.wasm');
+await db.open('mydb', { 
+    cacheSize: 4 * 1024 * 1024,
+    compression: false 
+});
+
+// Store data
+await db.put('user:123', JSON.stringify({ name: 'Alice', age: 30 }));
+
+// Retrieve data
+const userData = await db.get('user:123');
+console.log(JSON.parse(userData));
+
+// Check existence
+const exists = await db.contains('user:123'); // true
+
+// Delete
+await db.delete('user:123');
+
+// Get stats
+const stats = await db.getStats();
+console.log(`Total keys: ${stats.totalKeys}`);
+
+// Close
+db.close();
+```
+
+### Browser Features
+
+- ✅ **In-memory storage** (677KB WASM module)
+- ✅ **Promise-based API** for async operations
+- ✅ **Zero dependencies** - pure JavaScript wrapper
+- ✅ **TypeScript-friendly** API design
+- ⚠️ **No persistence** yet (IndexedDB integration coming soon)
+- ⚠️ **No power management** (browser limitations)
+
 ## 🔋 Power Modes
 
 ZMDB automatically adapts to your device's power state:

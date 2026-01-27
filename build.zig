@@ -35,10 +35,14 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     // Tests
-    const lib_unit_tests = b.addTest(.{
+    const lib_test_module = b.createModule(.{
         .root_source_file = b.path("src/lib.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    
+    const lib_unit_tests = b.addTest(.{
+        .root_module = lib_test_module,
     });
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
@@ -83,4 +87,32 @@ pub fn build(b: *std.Build) void {
     const lsm_bench_cmd = b.addRunArtifact(lsm_bench);
     const lsm_bench_step = b.step("bench-lsm", "Run LSM-Tree benchmark");
     lsm_bench_step.dependOn(&lsm_bench_cmd.step);
+    
+    // WebAssembly build
+    const wasm_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+    });
+    
+    const wasm_module = b.createModule(.{
+        .root_source_file = b.path("src/wasm.zig"),
+        .target = wasm_target,
+        .optimize = .ReleaseFast,
+    });
+    
+    const wasm_lib = b.addExecutable(.{
+        .name = "zmdb",
+        .root_module = wasm_module,
+    });
+    
+    // Configure WASM output
+    wasm_lib.entry = .disabled; // No main function for library
+    wasm_lib.rdynamic = true; // Export all symbols
+    
+    const wasm_install = b.addInstallArtifact(wasm_lib, .{
+        .dest_dir = .{ .override = .{ .custom = "wasm" } },
+    });
+    
+    const wasm_step = b.step("build-wasm", "Build WebAssembly module");
+    wasm_step.dependOn(&wasm_install.step);
 }
