@@ -115,6 +115,24 @@ pub fn build(b: *std.Build) void {
     const debug_step = b.step("debug-db", "Run database debug tool");
     debug_step.dependOn(&debug_cmd.step);
     
+    // Persistence test
+    const persist_module = b.createModule(.{
+        .root_source_file = b.path("src/test_persistence.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    persist_module.addImport("lib", zmdb_module);
+    
+    const persist_exe = b.addExecutable(.{
+        .name = "test-persistence",
+        .root_module = persist_module,
+    });
+    b.installArtifact(persist_exe);
+    
+    const persist_cmd = b.addRunArtifact(persist_exe);
+    const persist_step = b.step("test-persist", "Test data persistence");
+    persist_step.dependOn(&persist_cmd.step);
+    
     // LSM benchmark
     const lsm_bench_module = b.createModule(.{
         .root_source_file = b.path("src/bench_lsm.zig"),

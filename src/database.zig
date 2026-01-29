@@ -173,8 +173,9 @@ pub const Database = struct {
         
         // Decompress if needed
         if (entry.compressed and self.config.compression) {
-            // TODO: Implement decompression
-            return value;
+            const decompressed = try decompress(allocator, value, entry.size);
+            allocator.free(value);
+            return decompressed;
         }
         
         return value;
@@ -221,9 +222,64 @@ pub const Database = struct {
     };
     
     fn loadIndex(self: *Database) !void {
-        _ = self;
-        // TODO: Scan WAL and main file to rebuild index
-        // For now, start with empty index
+        const wal_file = self.wal orelse return;
+        
+        // Get WAL file size
+        const stat = try wal_file.stat();
+        const file_size = stat.size;
+        
+        if (file_size == 0) return; // Empty WAL, nothing to load
+        
+        // Scan WAL from beginning
+        var offset: u64 = 0;
+        while (offset < file_size) {
+            // Read record header
+            var header: RecordHeader = undefined;
+            const header_bytes = try std.posix.pread(
+                wal_file.handle,
+                std.mem.asBytes(&header),
+                offset
+            );
+            
+            if (header_bytes != @sizeOf(RecordHeader)) break; // End of valid data
+            
+            // Read key
+            const key_offset = offset + @sizeOf(RecordHeader);
+            const key_buf = try self.allocator.alloc(u8, header.key_len);
+            errdefer self.allocator.free(key_buf);
+            
+            const key_bytes = try std.posix.pread(
+                wal_file.handle,
+                key_buf,
+                key_offset
+            );
+            
+            if (key_bytes != header.key_len) {
+                self.allocator.free(key_buf);
+                break; // Corrupted record
+            }
+            
+            // Add to index (or update if exists)
+            if (self.index.get(key_buf)) |_| {
+                // Key exists, free the new buffer and update entry
+                self.allocator.free(key_buf);
+                try self.index.put(key_buf, .{
+                    .offset = offset,
+                    .size = header.value_len,
+                    .compressed = (header.flags & 0x01) != 0,
+                });
+            } else {
+                // New key, add to index
+                try self.index.put(key_buf, .{
+                    .offset = offset,
+                    .size = header.value_len,
+                    .compressed = (header.flags & 0x01) != 0,
+                });
+            }
+            
+            // Move to next record
+            offset += @sizeOf(RecordHeader) + header.key_len + header.value_len;
+        }
     }
     
     fn appendToWAL(self: *Database, key: []const u8, value: []const u8) !u64 {
