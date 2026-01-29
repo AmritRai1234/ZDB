@@ -170,8 +170,8 @@ pub const SSTable = struct {
             var bf = try bloom.BloomFilter.init(allocator, num_blocks * 100, num_hashes); // Approximate
             errdefer bf.deinit();
             
-            // Read bloom filter data
-            const blocks_bytes = try allocator.alloc(u8, num_blocks * @sizeOf(bloom.BloomFilter.Block));
+            // Read bloom filter data (each block is 64 bytes)
+            const blocks_bytes = try allocator.alloc(u8, num_blocks * 64);
             defer allocator.free(blocks_bytes);
             _ = try file.readAll(blocks_bytes);
             @memcpy(std.mem.sliceAsBytes(bf.blocks), blocks_bytes);
