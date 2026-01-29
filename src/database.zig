@@ -5,6 +5,7 @@ const compress = @import("compression.zig").compress;
 const decompress = @import("compression.zig").decompress;
 const simd = @import("simd.zig");
 const WriteCombiningBuffer = @import("write_buffer.zig").WriteCombiningBuffer;
+const fast = @import("fast.zig");
 
 /// Database configuration options
 pub const Config = struct {
@@ -35,7 +36,7 @@ pub const Database = struct {
     allocator: Allocator,
     config: Config,
     file: std.fs.File,
-    index: std.StringHashMap(Entry),
+    index: fast.FastIndex,  // C hash table for maximum performance
     wal: ?std.fs.File,
     rwlock: std.Thread.RwLock,
     cache: LRUCache([256]u8, []u8), // Cache for read optimization
@@ -80,7 +81,7 @@ pub const Database = struct {
             .allocator = allocator,
             .config = config,
             .file = file,
-            .index = std.StringHashMap(Entry).init(allocator),
+            .index = try fast.FastIndex.init(allocator, 1024 * 1024),  // 1M capacity
             .wal = wal,
             .rwlock = .{},
             .cache = LRUCache([256]u8, []u8).init(allocator, 256), // 256 entry cache
@@ -99,12 +100,7 @@ pub const Database = struct {
     
     /// Clean up and close database
     pub fn deinit(self: *Database) void {
-        // Free all keys in the index
-        var iter = self.index.keyIterator();
-        while (iter.next()) |key| {
-            self.allocator.free(key.*);
-        }
-        
+        // FastIndex cleanup (no need to free keys, C handles it)
         self.index.deinit();
         self.cache.deinit();
         
@@ -129,14 +125,16 @@ pub const Database = struct {
         // Write to WAL first for durability
         const offset = try self.appendToWAL(key, value);
         
-        // Update in-memory index
-        const key_copy = try self.allocator.dupe(u8, key);
-        try self.index.put(key_copy, .{
-            .offset = offset,
-            .size = @intCast(value.len),
-            .key_len = @intCast(key.len),
-            .compressed = self.config.compression,
-        });
+        // Update in-memory index using C hash table
+        const hash = std.hash.Wyhash.hash(0, key);
+        try self.index.put(
+            key,
+            hash,
+            offset,
+            @intCast(value.len),
+            @intCast(key.len),
+            self.config.compression,
+        );
         
         // Sync if configured
         if (self.config.sync_mode == .full) {
@@ -149,7 +147,17 @@ pub const Database = struct {
         self.rwlock.lockShared();  // Shared read lock - multiple readers OK!
         defer self.rwlock.unlockShared();
         
-        const entry = self.index.get(key) orelse return error.NotFound;
+        // Lookup in C hash table
+        const hash = std.hash.Wyhash.hash(0, key);
+        const c_entry = self.index.get(key, hash) orelse return error.NotFound;
+        
+        // Convert C entry to Zig entry
+        const entry = Entry{
+            .offset = c_entry.offset,
+            .size = c_entry.size,
+            .key_len = c_entry.key_len,
+            .compressed = c_entry.compressed != 0,
+        };
         
         // Read from WAL/main file
         const wal_file = self.wal orelse return error.Corruption;
@@ -185,14 +193,12 @@ pub const Database = struct {
         self.rwlock.lock();  // Exclusive write lock
         defer self.rwlock.unlock();
         
-        if (self.index.fetchRemove(key)) |kv| {
-            self.allocator.free(kv.key);
-            
-            // Write tombstone to WAL
-            try self.appendTombstone(key);
-        } else {
-            return error.NotFound;
-        }
+        // Delete from C hash table
+        const hash = std.hash.Wyhash.hash(0, key);
+        try self.index.delete(key, hash);
+        
+        // Write tombstone to WAL
+        try self.appendTombstone(key);
     }
     
     /// Check if a key exists
@@ -200,7 +206,8 @@ pub const Database = struct {
         self.rwlock.lockShared();  // Shared read lock
         defer self.rwlock.unlockShared();
         
-        return self.index.contains(key);
+        const hash = std.hash.Wyhash.hash(0, key);
+        return self.index.get(key, hash) != null;
     }
     
     /// Get the number of keys in the database
@@ -258,26 +265,16 @@ pub const Database = struct {
                 break; // Corrupted record
             }
             
-            // Add to index (or update if exists)
-            const gop = try self.index.getOrPut(key_buf);
-            if (gop.found_existing) {
-                // Key already exists, free the new buffer and update entry
-                self.allocator.free(key_buf);
-                gop.value_ptr.* = .{
-                    .offset = offset,
-                    .size = header.value_len,
-                    .key_len = header.key_len,
-                    .compressed = (header.flags & 0x01) != 0,
-                };
-            } else {
-                // New key, set the entry
-                gop.value_ptr.* = .{
-                    .offset = offset,
-                    .size = header.value_len,
-                    .key_len = header.key_len,
-                    .compressed = (header.flags & 0x01) != 0,
-                };
-            }
+            // Add to index using C hash table
+            const hash = std.hash.Wyhash.hash(0, key_buf);
+            try self.index.put(
+                key_buf,
+                hash,
+                offset,
+                header.value_len,
+                header.key_len,
+                (header.flags & 0x01) != 0,
+            );
             
             // Move to next record
             offset += @sizeOf(RecordHeader) + header.key_len + header.value_len;

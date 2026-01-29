@@ -54,6 +54,12 @@ pub fn build(b: *std.Build) void {
     const lib_unit_tests = b.addTest(.{
         .root_module = lib_test_module,
     });
+    
+    // Link C libraries for tests
+    lib_unit_tests.linkLibC();
+    lib_unit_tests.linkSystemLibrary("xxhash");
+    lib_unit_tests.linkSystemLibrary("lz4");
+    lib_unit_tests.addIncludePath(b.path("src"));
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
@@ -74,6 +80,9 @@ pub fn build(b: *std.Build) void {
     });
     sqlite_bench.linkLibC();
     sqlite_bench.linkSystemLibrary("sqlite3");
+    sqlite_bench.linkSystemLibrary("xxhash");
+    sqlite_bench.linkSystemLibrary("lz4");
+    sqlite_bench.addIncludePath(b.path("src"));
     b.installArtifact(sqlite_bench);
     
     const sqlite_bench_cmd = b.addRunArtifact(sqlite_bench);
@@ -94,6 +103,9 @@ pub fn build(b: *std.Build) void {
     });
     simple_bench.linkLibC();
     simple_bench.linkSystemLibrary("sqlite3");
+    simple_bench.linkSystemLibrary("xxhash");
+    simple_bench.linkSystemLibrary("lz4");
+    simple_bench.addIncludePath(b.path("src"));
     b.installArtifact(simple_bench);
     
     const simple_bench_cmd = b.addRunArtifact(simple_bench);
@@ -112,6 +124,12 @@ pub fn build(b: *std.Build) void {
         .name = "zmdb-debug",
         .root_module = debug_module,
     });
+    
+    // Link C libraries
+    debug_exe.linkLibC();
+    debug_exe.linkSystemLibrary("xxhash");
+    debug_exe.linkSystemLibrary("lz4");
+    debug_exe.addIncludePath(b.path("src"));
     b.installArtifact(debug_exe);
     
     const debug_cmd = b.addRunArtifact(debug_exe);
@@ -130,6 +148,10 @@ pub fn build(b: *std.Build) void {
         .name = "test-persistence",
         .root_module = persist_module,
     });
+    persist_exe.linkLibC();
+    persist_exe.linkSystemLibrary("xxhash");
+    persist_exe.linkSystemLibrary("lz4");
+    persist_exe.addIncludePath(b.path("src"));
     b.installArtifact(persist_exe);
     
     const persist_cmd = b.addRunArtifact(persist_exe);
