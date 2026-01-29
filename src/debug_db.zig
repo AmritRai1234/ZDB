@@ -70,10 +70,11 @@ pub fn main() !void {
     std.debug.print("-" ** 40 ++ "\n", .{});
     std.debug.print("Index size: {}\n", .{db.index.count()});
     
-    var iter = db.index.keyIterator();
+    var iter = db.index.iterator();
     var count: usize = 0;
-    while (iter.next()) |key| {
-        std.debug.print("  Key {}: {s}\n", .{count, key.*});
+    while (iter.next()) |entry| {
+        const key = entry.key[0..entry.key_len];
+        std.debug.print("  Key {}: {s}\n", .{count, key});
         count += 1;
     }
     
