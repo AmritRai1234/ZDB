@@ -78,16 +78,13 @@ pub const Database = struct {
         // Initialize write buffer for high-performance writes
         const write_buffer = WriteCombiningBuffer.init(allocator, wal) catch null;
         
-        // Memory-map the WAL file for zero-copy reads
-        const mmap_wal = fast.MappedFile.init(wal.handle) catch null;
-        
         var db = Database{
             .allocator = allocator,
             .config = config,
             .file = file,
             .index = try fast.FastIndex.init(allocator, 1024 * 1024),  // 1M capacity
             .wal = wal,
-            .mmap_wal = mmap_wal,
+            .mmap_wal = null,  // Lazy-initialized on first read
             .rwlock = .{},
             .cache = LRUCache([256]u8, []u8).init(allocator, 256), // 256 entry cache
             .write_buffer = write_buffer,
@@ -172,6 +169,11 @@ pub const Database = struct {
         const header_size = @sizeOf(RecordHeader);
         const total_size = header_size + entry.key_len + entry.size;
         
+        // Lazy-initialize mmap on first read
+        if (self.mmap_wal == null and self.wal != null) {
+            self.mmap_wal = fast.MappedFile.init(self.wal.?.handle) catch null;
+        }
+        
         // FAST PATH: Use mmap for zero-copy reads
         if (self.mmap_wal) |*mmap| {
             const data = mmap.read(entry.offset, total_size) orelse return error.Corruption;
@@ -221,6 +223,12 @@ pub const Database = struct {
         
         // Only works with uncompressed data and mmap
         if (c_entry.compressed != 0) return error.Compressed;
+        
+        // Lazy-initialize mmap if needed
+        if (self.mmap_wal == null and self.wal != null) {
+            self.mmap_wal = fast.MappedFile.init(self.wal.?.handle) catch null;
+        }
+        
         if (self.mmap_wal == null) return error.MmapNotAvailable;
         
         const entry = Entry{

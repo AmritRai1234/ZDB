@@ -134,6 +134,28 @@ pub fn build(b: *std.Build) void {
     const profile_bench_step = b.step("bench-profile", "Run profiling benchmark");
     profile_bench_step.dependOn(&profile_bench_cmd.step);
     
+    // Zero-copy benchmark
+    const zerocopy_bench_module = b.createModule(.{
+        .root_source_file = b.path("src/bench_zerocopy.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    zerocopy_bench_module.addImport("lib", zmdb_module);
+    
+    const zerocopy_bench = b.addExecutable(.{
+        .name = "zmdb-zerocopy",
+        .root_module = zerocopy_bench_module,
+    });
+    zerocopy_bench.linkLibC();
+    zerocopy_bench.linkSystemLibrary("xxhash");
+    zerocopy_bench.linkSystemLibrary("lz4");
+    zerocopy_bench.addIncludePath(b.path("src"));
+    b.installArtifact(zerocopy_bench);
+    
+    const zerocopy_bench_cmd = b.addRunArtifact(zerocopy_bench);
+    const zerocopy_bench_step = b.step("bench-zerocopy", "Run zero-copy performance benchmark");
+    zerocopy_bench_step.dependOn(&zerocopy_bench_cmd.step);
+    
     // Debug tool
     const debug_module = b.createModule(.{
         .root_source_file = b.path("src/debug_db.zig"),
