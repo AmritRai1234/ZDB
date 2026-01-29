@@ -156,6 +156,23 @@ pub fn build(b: *std.Build) void {
     const zerocopy_bench_step = b.step("bench-zerocopy", "Run zero-copy performance benchmark");
     zerocopy_bench_step.dependOn(&zerocopy_bench_cmd.step);
     
+    // Benchmark: Hybrid architecture
+    const hybrid_bench = b.addExecutable(.{
+        .name = "bench_hybrid",
+        .root_source_file = b.path("src/bench_hybrid.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    hybrid_bench.linkLibC();
+    hybrid_bench.addIncludePath(b.path("src"));
+    hybrid_bench.linkSystemLibrary("xxhash");
+    hybrid_bench.linkSystemLibrary("lz4");
+    b.installArtifact(hybrid_bench);
+    
+    const hybrid_bench_cmd = b.addRunArtifact(hybrid_bench);
+    const hybrid_bench_step = b.step("bench-hybrid", "Run hybrid architecture benchmark");
+    hybrid_bench_step.dependOn(&hybrid_bench_cmd.step);
+    
     // Debug tool
     const debug_module = b.createModule(.{
         .root_source_file = b.path("src/debug_db.zig"),
