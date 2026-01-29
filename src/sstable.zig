@@ -191,19 +191,55 @@ pub const SSTable = struct {
         // Find the block that might contain the key
         const block_offset = self.index.findBlock(key) orelse return null;
         
-        // TODO: Read and search the block
-        _ = block_offset;
+        // Read and search the block
+        if (self.mmap) |*mmap| {
+            // Zero-copy read from mmap
+            const BLOCK_SIZE = 4096;
+            const block_data = mmap.read(block_offset, BLOCK_SIZE) orelse return null;
+            
+            // Search for key in block
+            var offset: usize = 0;
+            while (offset + 8 < block_data.len) {
+                const key_len = std.mem.readInt(u32, block_data[offset..][0..4], .little);
+                const value_len = std.mem.readInt(u32, block_data[offset + 4..][0..8], .little);
+                offset += 8;
+                
+                if (offset + key_len + value_len > block_data.len) break;
+                
+                const entry_key = block_data[offset..offset + key_len];
+                offset += key_len;
+                
+                const entry_value = block_data[offset..offset + value_len];
+                offset += value_len;
+                
+                // Check if this is our key
+                if (std.mem.eql(u8, entry_key, key)) {
+                    return entry_value; // Zero-copy!
+                }
+                
+                // Keys are sorted, so if we've passed our key, it's not here
+                if (std.mem.order(u8, entry_key, key) == .gt) {
+                    return null;
+                }
+            }
+        }
         
         return null;
     }
     
     /// Scan range [start, end)
     pub fn scan(self: *SSTable, start: []const u8, end: []const u8) Iterator {
+        // Find the block that might contain the start key
+        const start_offset = self.index.findBlock(start) orelse SSTable.Header.SIZE;
+        
         return Iterator{
             .sstable = self,
             .start = start,
             .end = end,
-            .current_offset = 0,
+            .current_offset = start_offset,
+            .current_block = null,
+            .block_offset = 0,
+            .finished = false,
         };
     }
     
@@ -212,11 +248,68 @@ pub const SSTable = struct {
         start: []const u8,
         end: []const u8,
         current_offset: u64,
+        current_block: ?[]const u8,
+        block_offset: usize,
+        finished: bool,
         
         pub fn next(self: *Iterator) ?KV {
-            // TODO: Implement iteration
-            _ = self;
-            return null;
+            if (self.finished) return null;
+            
+            const mmap = &(self.sstable.mmap orelse return null);
+            
+            // Load next block if needed
+            if (self.current_block == null) {
+                const BLOCK_SIZE = 4096;
+                const data = mmap.read(self.current_offset, BLOCK_SIZE) orelse {
+                    self.finished = true;
+                    return null;
+                };
+                self.current_block = data;
+                self.block_offset = 0;
+            }
+            
+            const block = self.current_block.?;
+            
+            // Parse entries in current block
+            while (self.block_offset + 8 < block.len) {
+                const key_len = std.mem.readInt(u32, block[self.block_offset..][0..4], .little);
+                const value_len = std.mem.readInt(u32, block[self.block_offset + 4..][0..8], .little);
+                self.block_offset += 8;
+                
+                if (self.block_offset + key_len + value_len > block.len) {
+                    // Move to next block
+                    self.current_offset += 4096;
+                    self.current_block = null;
+                    return self.next();
+                }
+                
+                const key = block[self.block_offset..self.block_offset + key_len];
+                self.block_offset += key_len;
+                
+                const value = block[self.block_offset..self.block_offset + value_len];
+                self.block_offset += value_len;
+                
+                // Check if key is in range [start, end)
+                const cmp_start = std.mem.order(u8, key, self.start);
+                const cmp_end = std.mem.order(u8, key, self.end);
+                
+                if (cmp_start == .lt) continue; // Before range
+                if (cmp_end != .lt) { // At or past end
+                    self.finished = true;
+                    return null;
+                }
+                
+                // Key is in range!
+                return KV{
+                    .key = key,
+                    .value = value,
+                };
+            }
+            
+            // End of block, move to next
+            self.current_offset += 4096;
+            self.current_block = null;
+            return self.next();
         }
     };
     
