@@ -330,6 +330,10 @@ pub const Database = struct {
 test "database init and deinit" {
     const allocator = std.testing.allocator;
     
+    // Clean up from previous runs
+    std.fs.cwd().deleteFile("/tmp/test.db") catch {};
+    std.fs.cwd().deleteFile("/tmp/test.db.wal") catch {};
+    
     var db = try Database.init(allocator, "/tmp/test.db", .{});
     defer db.deinit();
     
@@ -338,6 +342,10 @@ test "database init and deinit" {
 
 test "basic put and get" {
     const allocator = std.testing.allocator;
+    
+    // Clean up from previous runs
+    std.fs.cwd().deleteFile("/tmp/test_put_get.db") catch {};
+    std.fs.cwd().deleteFile("/tmp/test_put_get.db.wal") catch {};
     
     var db = try Database.init(allocator, "/tmp/test_put_get.db", .{});
     defer db.deinit();
@@ -352,6 +360,10 @@ test "basic put and get" {
 
 test "delete key" {
     const allocator = std.testing.allocator;
+    
+    // Clean up from previous runs
+    std.fs.cwd().deleteFile("/tmp/test_delete.db") catch {};
+    std.fs.cwd().deleteFile("/tmp/test_delete.db.wal") catch {};
     
     var db = try Database.init(allocator, "/tmp/test_delete.db", .{});
     defer db.deinit();
