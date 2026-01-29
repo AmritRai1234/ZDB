@@ -38,6 +38,7 @@ pub const Database = struct {
     file: std.fs.File,
     index: fast.FastIndex,  // C hash table for maximum performance
     wal: ?std.fs.File,
+    mmap_wal: ?fast.MappedFile,  // Memory-mapped WAL for zero-copy reads
     rwlock: std.Thread.RwLock,
     cache: LRUCache([256]u8, []u8), // Cache for read optimization
     write_buffer: ?WriteCombiningBuffer, // High-performance write batching
@@ -77,12 +78,16 @@ pub const Database = struct {
         // Initialize write buffer for high-performance writes
         const write_buffer = WriteCombiningBuffer.init(allocator, wal) catch null;
         
+        // Memory-map the WAL file for zero-copy reads
+        const mmap_wal = fast.MappedFile.init(wal.handle) catch null;
+        
         var db = Database{
             .allocator = allocator,
             .config = config,
             .file = file,
             .index = try fast.FastIndex.init(allocator, 1024 * 1024),  // 1M capacity
             .wal = wal,
+            .mmap_wal = mmap_wal,
             .rwlock = .{},
             .cache = LRUCache([256]u8, []u8).init(allocator, 256), // 256 entry cache
             .write_buffer = write_buffer,
@@ -107,6 +112,11 @@ pub const Database = struct {
         // Clean up write buffer
         if (self.write_buffer) |*wb| {
             wb.deinit();
+        }
+        
+        // Clean up memory-mapped WAL
+        if (self.mmap_wal) |*mmap| {
+            mmap.deinit();
         }
         
         self.file.close();
@@ -142,7 +152,7 @@ pub const Database = struct {
         }
     }
     
-    /// Retrieve a value by key (ultra-optimized with single syscall)
+    /// Retrieve a value by key (ultra-optimized with mmap zero-copy)
     pub fn get(self: *Database, key: []const u8, allocator: Allocator) ![]u8 {
         self.rwlock.lockShared();  // Shared read lock - multiple readers OK!
         defer self.rwlock.unlockShared();
@@ -159,32 +169,43 @@ pub const Database = struct {
             .compressed = c_entry.compressed != 0,
         };
         
-        // Read from WAL/main file
-        const wal_file = self.wal orelse return error.Corruption;
-        const fd = wal_file.handle;
-        
-        // OPTIMIZATION: Single buffered read for header + key + value
         const header_size = @sizeOf(RecordHeader);
         const total_size = header_size + entry.key_len + entry.size;
         
-        // Allocate buffer for entire record
+        // FAST PATH: Use mmap for zero-copy reads
+        if (self.mmap_wal) |*mmap| {
+            const data = mmap.read(entry.offset, total_size) orelse return error.Corruption;
+            
+            // Extract value (skip header + key) - zero-copy slice
+            const value_offset = header_size + entry.key_len;
+            const value_slice = data[value_offset..value_offset + entry.size];
+            
+            // Decompress if needed
+            if (entry.compressed and self.config.compression) {
+                return try decompress(allocator, value_slice, entry.size);
+            }
+            
+            // Return owned copy
+            return try allocator.dupe(u8, value_slice);
+        }
+        
+        // SLOW PATH: Fallback to pread if mmap not available
+        const wal_file = self.wal orelse return error.Corruption;
+        const fd = wal_file.handle;
+        
         var read_buf = try allocator.alloc(u8, total_size);
         defer allocator.free(read_buf);
         
-        // Single pread syscall for entire record
         const bytes_read = try std.posix.pread(fd, read_buf, entry.offset);
         if (bytes_read != total_size) return error.Corruption;
         
-        // Extract value (skip header + key) - zero-copy slice
         const value_offset = header_size + entry.key_len;
         const value_slice = read_buf[value_offset..value_offset + entry.size];
         
-        // Decompress if needed
         if (entry.compressed and self.config.compression) {
             return try decompress(allocator, value_slice, entry.size);
         }
         
-        // Return owned copy
         return try allocator.dupe(u8, value_slice);
     }
     
