@@ -444,7 +444,13 @@ pub const SSTableWriter = struct {
         
         // Write bloom filter
         const bloom_offset = try self.file.getPos();
-        try self.bloom_filter.serialize(self.file.writer());
+        // Write bloom filter metadata
+        var bloom_buf: [16]u8 = undefined;
+        std.mem.writeInt(u64, bloom_buf[0..8], self.bloom_filter.num_bits, .little);
+        std.mem.writeInt(u64, bloom_buf[8..16], self.bloom_filter.num_hashes, .little);
+        try self.file.writeAll(&bloom_buf);
+        // Write bloom filter data
+        try self.file.writeAll(std.mem.sliceAsBytes(self.bloom_filter.blocks));
         
         // Write header
         const header = SSTable.Header{
