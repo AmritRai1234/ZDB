@@ -21,10 +21,11 @@ pub const PowerManager = struct {
     };
     
     pub const PowerMode = enum {
-        aggressive,  // Charging + high battery
-        balanced,    // Normal operation
-        saver,       // Low battery
-        deep_sleep,  // Idle, minimize everything
+        aggressive,   // Charging + high battery
+        balanced,     // Normal operation
+        saver,        // Low battery (20-10%)
+        ultra_saver,  // Critical battery (<10%)
+        deep_sleep,   // Idle, minimize everything
     };
     
     pub fn init() PowerManager {
@@ -53,10 +54,11 @@ pub const PowerManager = struct {
     /// Should we do aggressive background work?
     pub fn shouldDoBackgroundWork(self: *PowerManager) bool {
         return switch (self.power_mode) {
-            .aggressive => true,  // Charging, go wild!
+            .aggressive => true,   // Charging, go wild!
             .balanced => self.thermal_state == .normal,
-            .saver => false,      // Defer everything
-            .deep_sleep => false, // Don't wake up
+            .saver => false,       // Defer everything
+            .ultra_saver => false, // Absolutely no background work
+            .deep_sleep => false,  // Don't wake up
         };
     }
     
@@ -66,6 +68,7 @@ pub const PowerManager = struct {
             .aggressive => pending_bytes > 16 * 1024,  // 16KB threshold when charging
             .balanced => pending_bytes > 64 * 1024 or time_since_last_flush_ms > 60_000,
             .saver => pending_bytes > 256 * 1024 or time_since_last_flush_ms > 300_000,  // 5 min
+            .ultra_saver => pending_bytes > 1024 * 1024 or time_since_last_flush_ms > 600_000,  // 10 min, 1MB
             .deep_sleep => false,  // Only flush on explicit commit
         };
     }
@@ -77,7 +80,8 @@ pub const PowerManager = struct {
         return switch (self.power_mode) {
             .aggressive => size > 256,
             .balanced => size > 128,
-            .saver => size > 64,  // Aggressive compression
+            .saver => size > 64,   // Aggressive compression
+            .ultra_saver => size > 32,  // Maximum compression
             .deep_sleep => size > 64,
         };
     }
@@ -85,20 +89,33 @@ pub const PowerManager = struct {
     /// Get compaction frequency (ms between compactions)
     pub fn getCompactionInterval(self: *PowerManager) i64 {
         return switch (self.power_mode) {
-            .aggressive => 60_000,      // 1 minute (charging)
-            .balanced => 300_000,       // 5 minutes
-            .saver => 1_800_000,        // 30 minutes
-            .deep_sleep => 86_400_000,  // 24 hours (basically never)
+            .aggressive => 60_000,       // 1 minute (charging)
+            .balanced => 300_000,        // 5 minutes
+            .saver => 1_800_000,         // 30 minutes
+            .ultra_saver => 7_200_000,   // 2 hours
+            .deep_sleep => 86_400_000,   // 24 hours (basically never)
         };
     }
     
     /// Get batch size for writes
     pub fn getBatchSize(self: *PowerManager) usize {
         return switch (self.power_mode) {
-            .aggressive => 16 * 1024,   // 16KB (small batches, quick flush)
-            .balanced => 64 * 1024,     // 64KB
-            .saver => 256 * 1024,       // 256KB (huge batches, rare flush)
-            .deep_sleep => 1024 * 1024, // 1MB (almost never flush)
+            .aggressive => 16 * 1024,    // 16KB (small batches, quick flush)
+            .balanced => 64 * 1024,      // 64KB
+            .saver => 256 * 1024,        // 256KB (huge batches, rare flush)
+            .ultra_saver => 1024 * 1024, // 1MB (maximum batching)
+            .deep_sleep => 1024 * 1024,  // 1MB (almost never flush)
+        };
+    }
+    
+    /// Get compression level based on power mode
+    pub fn getCompressionLevel(self: *PowerManager) i32 {
+        return switch (self.power_mode) {
+            .aggressive => 1,      // Fastest
+            .balanced => 3,        // Fast
+            .saver => 6,           // Default
+            .ultra_saver => 9,     // Best compression
+            .deep_sleep => 9,      // Best compression
         };
     }
     
@@ -175,10 +192,14 @@ pub const PowerManager = struct {
     }
     
     fn calculatePowerMode(self: *PowerManager) PowerMode {
-        // Deep sleep: not charging + idle
+        // Ultra saver: <10% battery (critical)
+        // Saver: <20% battery (low)
         // Aggressive: charging + high battery + cool
-        // Saver: low battery
         // Balanced: everything else
+        
+        if (self.battery_level < 0.1) {
+            return .ultra_saver;  // < 10% battery - critical!
+        }
         
         if (self.battery_level < 0.2) {
             return .saver;  // < 20% battery

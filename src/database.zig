@@ -8,8 +8,8 @@ const WriteCombiningBuffer = @import("write_buffer.zig").WriteCombiningBuffer;
 
 /// Database configuration options
 pub const Config = struct {
-    /// Size of in-memory cache in bytes (default: 4MB)
-    cache_size: usize = 4 * 1024 * 1024,
+    /// Size of in-memory cache in bytes (default: 16MB for better performance)
+    cache_size: usize = 16 * 1024 * 1024,
     
     /// Enable compression for stored values
     compression: bool = true,
@@ -37,7 +37,7 @@ pub const Database = struct {
     file: std.fs.File,
     index: std.StringHashMap(Entry),
     wal: ?std.fs.File,
-    mutex: std.Thread.Mutex,
+    rwlock: std.Thread.RwLock,
     cache: LRUCache([256]u8, []u8), // Cache for read optimization
     write_buffer: ?WriteCombiningBuffer, // High-performance write batching
     
@@ -81,7 +81,7 @@ pub const Database = struct {
             .file = file,
             .index = std.StringHashMap(Entry).init(allocator),
             .wal = wal,
-            .mutex = .{},
+            .rwlock = .{},
             .cache = LRUCache([256]u8, []u8).init(allocator, 256), // 256 entry cache
             .write_buffer = write_buffer,
             .total_reads = 0,
@@ -106,6 +106,12 @@ pub const Database = struct {
         
         self.index.deinit();
         self.cache.deinit();
+        
+        // Clean up write buffer
+        if (self.write_buffer) |*wb| {
+            wb.deinit();
+        }
+        
         self.file.close();
         if (self.wal) |wal| {
             wal.close();
@@ -116,8 +122,8 @@ pub const Database = struct {
     pub fn put(self: *Database, key: []const u8, value: []const u8) !void {
         if (key.len == 0) return error.InvalidKey;
         
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.rwlock.lock();  // Exclusive write lock
+        defer self.rwlock.unlock();
         
         // Write to WAL first for durability
         const offset = try self.appendToWAL(key, value);
@@ -136,32 +142,34 @@ pub const Database = struct {
         }
     }
     
-    /// Retrieve a value by key
+    /// Retrieve a value by key (ultra-optimized with single syscall)
     pub fn get(self: *Database, key: []const u8, allocator: Allocator) ![]u8 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.rwlock.lockShared();  // Shared read lock - multiple readers OK!
+        defer self.rwlock.unlockShared();
         
         const entry = self.index.get(key) orelse return error.NotFound;
         
         // Read from WAL/main file
         const wal_file = self.wal orelse return error.Corruption;
-        try wal_file.seekTo(entry.offset);
+        const fd = wal_file.handle;
         
-        // Read record header
-        var header: RecordHeader = undefined;
-        const bytes_read = try wal_file.read(std.mem.asBytes(&header));
-        if (bytes_read != @sizeOf(RecordHeader)) return error.Corruption;
+        // Calculate total read size
+        const header_size = @sizeOf(RecordHeader);
+        const total_size = header_size + entry.size;
         
-        // Skip the key (we already know it)
-        const key_buf = try allocator.alloc(u8, header.key_len);
-        defer allocator.free(key_buf);
-        _ = try wal_file.read(key_buf);
+        // Single pread syscall for header + key + value (FAST!)
+        var read_buf = try allocator.alloc(u8, total_size);
+        defer allocator.free(read_buf);
         
-        // Read value
-        const value = try allocator.alloc(u8, header.value_len);
-        errdefer allocator.free(value);
+        const bytes_read = try std.posix.pread(fd, read_buf, entry.offset);
+        if (bytes_read != total_size) return error.Corruption;
         
-        _ = try wal_file.read(value);
+        // Parse header
+        const header = @as(*const RecordHeader, @ptrCast(@alignCast(read_buf.ptr))).*;
+        
+        // Extract value (skip header + key)
+        const value_offset = header_size + header.key_len;
+        const value = try allocator.dupe(u8, read_buf[value_offset..value_offset + header.value_len]);
         
         // Decompress if needed
         if (entry.compressed and self.config.compression) {
@@ -174,8 +182,8 @@ pub const Database = struct {
     
     /// Delete a key-value pair
     pub fn delete(self: *Database, key: []const u8) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.rwlock.lock();  // Exclusive write lock
+        defer self.rwlock.unlock();
         
         if (self.index.fetchRemove(key)) |kv| {
             self.allocator.free(kv.key);
@@ -189,16 +197,16 @@ pub const Database = struct {
     
     /// Check if a key exists
     pub fn contains(self: *Database, key: []const u8) bool {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.rwlock.lockShared();  // Shared read lock
+        defer self.rwlock.unlockShared();
         
         return self.index.contains(key);
     }
     
     /// Get the number of keys in the database
     pub fn count(self: *Database) usize {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.rwlock.lockShared();  // Shared read lock
+        defer self.rwlock.unlockShared();
         
         return self.index.count();
     }

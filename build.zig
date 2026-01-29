@@ -23,6 +23,13 @@ pub fn build(b: *std.Build) void {
         .name = "zmdb",
         .root_module = exe_module,
     });
+    
+    // Link high-performance C libraries
+    exe.linkLibC();
+    exe.linkSystemLibrary("xxhash");
+    exe.linkSystemLibrary("lz4");
+    exe.linkSystemLibrary("jemalloc");
+    
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -69,6 +76,44 @@ pub fn build(b: *std.Build) void {
     const sqlite_bench_cmd = b.addRunArtifact(sqlite_bench);
     const sqlite_bench_step = b.step("bench-sqlite", "Run ZMDB vs SQLite benchmark");
     sqlite_bench_step.dependOn(&sqlite_bench_cmd.step);
+    
+    // Simple benchmark (no persistence issues)
+    const simple_bench_module = b.createModule(.{
+        .root_source_file = b.path("src/bench_simple.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    simple_bench_module.addImport("lib", zmdb_module);
+    
+    const simple_bench = b.addExecutable(.{
+        .name = "zmdb-simple-bench",
+        .root_module = simple_bench_module,
+    });
+    simple_bench.linkLibC();
+    simple_bench.linkSystemLibrary("sqlite3");
+    b.installArtifact(simple_bench);
+    
+    const simple_bench_cmd = b.addRunArtifact(simple_bench);
+    const simple_bench_step = b.step("bench-simple", "Run simplified ZMDB vs SQLite benchmark");
+    simple_bench_step.dependOn(&simple_bench_cmd.step);
+    
+    // Debug tool
+    const debug_module = b.createModule(.{
+        .root_source_file = b.path("src/debug_db.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    debug_module.addImport("lib", zmdb_module);
+    
+    const debug_exe = b.addExecutable(.{
+        .name = "zmdb-debug",
+        .root_module = debug_module,
+    });
+    b.installArtifact(debug_exe);
+    
+    const debug_cmd = b.addRunArtifact(debug_exe);
+    const debug_step = b.step("debug-db", "Run database debug tool");
+    debug_step.dependOn(&debug_cmd.step);
     
     // LSM benchmark
     const lsm_bench_module = b.createModule(.{

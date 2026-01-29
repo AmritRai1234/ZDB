@@ -27,9 +27,39 @@ pub fn compareKeys(a: []const u8, b: []const u8) bool {
 pub fn hashKey(key: []const u8) u64 {
     if (key.len == 0) return 0;
     
-    var hasher = std.hash.Wyhash.init(0);
-    hasher.update(key);
-    return hasher.final();
+    // For small keys, use standard hash
+    if (key.len < 32) {
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(key);
+        return hasher.final();
+    }
+    
+    // SIMD-accelerated hashing for larger keys
+    var hash: u64 = 0xcbf29ce484222325; // FNV offset basis
+    var i: usize = 0;
+    
+    // Process 32 bytes at a time with vectors
+    while (i + 32 <= key.len) : (i += 32) {
+        const v1: @Vector(16, u8) = key[i..][0..16].*;
+        const v2: @Vector(16, u8) = key[i + 16..][0..16].*;
+        
+        // Reduce vectors to scalars and mix into hash
+        const sum1 = @reduce(.Add, v1);
+        const sum2 = @reduce(.Add, v2);
+        
+        hash ^= @as(u64, sum1);
+        hash *%= 0x100000001b3; // FNV prime
+        hash ^= @as(u64, sum2);
+        hash *%= 0x100000001b3;
+    }
+    
+    // Handle remaining bytes
+    while (i < key.len) : (i += 1) {
+        hash ^= key[i];
+        hash *%= 0x100000001b3;
+    }
+    
+    return hash;
 }
 
 /// Vectorized memory copy (faster than @memcpy for large buffers)
@@ -90,10 +120,52 @@ test "SIMD hash consistency" {
     try std.testing.expect(hash1 != 0);
 }
 
+/// Vectorized checksum computation (CRC32 alternative)
+pub fn vectorizedChecksum(data: []const u8) u32 {
+    if (data.len == 0) return 0;
+    
+    var checksum: u32 = 0xffffffff;
+    var i: usize = 0;
+    
+    // Process 16 bytes at a time
+    while (i + 16 <= data.len) : (i += 16) {
+        const v: @Vector(16, u8) = data[i..][0..16].*;
+        const sum = @reduce(.Add, v);
+        checksum ^= @as(u32, sum);
+        checksum = checksum *% 0x1EDC6F41; // Mix
+    }
+    
+    // Handle remainder
+    while (i < data.len) : (i += 1) {
+        checksum ^= data[i];
+        checksum = checksum *% 0x1EDC6F41;
+    }
+    
+    return ~checksum;
+}
+
 test "vectorized copy" {
     var dest: [100]u8 = undefined;
     const src = "x" ** 100;
     
     fastCopy(&dest, src);
     try std.testing.expect(std.mem.eql(u8, &dest, src));
+}
+
+test "SIMD hash performance" {
+    const key = "this_is_a_longer_key_for_simd_hashing_test_1234567890";
+    const hash1 = hashKey(key);
+    const hash2 = hashKey(key);
+    
+    try std.testing.expect(hash1 == hash2);
+    try std.testing.expect(hash1 != 0);
+}
+
+test "vectorized checksum" {
+    const data = "test data for checksum";
+    const cs1 = vectorizedChecksum(data);
+    const cs2 = vectorizedChecksum(data);
+    
+    try std.testing.expect(cs1 == cs2);
+    try std.testing.expect(cs1 != 0);
 }

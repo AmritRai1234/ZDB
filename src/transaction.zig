@@ -20,7 +20,7 @@ pub const Transaction = struct {
         return .{
             .db = db,
             .allocator = allocator,
-            .operations = std.ArrayList(Operation){},
+            .operations = .{},  // Empty ArrayList
             .committed = false,
         };
     }

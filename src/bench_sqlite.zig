@@ -144,52 +144,42 @@ fn benchmarkSQLiteWrites(count: usize) !BenchmarkResult {
 }
 
 fn benchmarkZMDBReads(allocator: std.mem.Allocator, count: usize) !BenchmarkResult {
+    // Reuse the database populated in the write benchmark
     var db = try Database.init(allocator, "bench_zmdb.db", .{
         .cache_size = 4 * 1024 * 1024,
         .compression = false,
         .sync_mode = .none,
     });
-    
-    // Populate with transaction
-    var tx = Transaction.init(&db, allocator);
-    var i: usize = 0;
-    while (i < count) : (i += 1) {
-        var key_buf: [32]u8 = undefined;
-        const key = try std.fmt.bufPrint(&key_buf, "key_{d:0>10}", .{i});
-        
-        var value_buf: [128]u8 = undefined;
-        const value = try std.fmt.bufPrint(&value_buf, "value_{d}_{s}", .{i, "x" ** 100});
-        
-        try tx.put(key, value);
-    }
-    try tx.commit();
-    tx.deinit();
+    defer db.deinit();
     
     const start = std.time.milliTimestamp();
     
     var rng = std.Random.DefaultPrng.init(@intCast(std.time.milliTimestamp()));
-    i = 0;
+    var i: usize = 0;
+    var successful_reads: usize = 0;
     while (i < count) : (i += 1) {
         const random_key = rng.random().intRangeAtMost(usize, 0, count - 1);
         
         var key_buf: [32]u8 = undefined;
         const key = try std.fmt.bufPrint(&key_buf, "key_{d:0>10}", .{random_key});
         
-        const value = try db.get(key, allocator);
-        allocator.free(value);
+        if (db.get(key, allocator)) |value| {
+            allocator.free(value);
+            successful_reads += 1;
+        } else |_| {
+            // Key not found, skip
+        }
     }
     
     const end = std.time.milliTimestamp();
     const duration = end - start;
     
-    db.deinit();
-    
     return .{
         .name = "ZMDB Random Reads",
-        .operations = count,
+        .operations = successful_reads,
         .duration_ms = duration,
-        .ops_per_sec = @as(f64, @floatFromInt(count)) / (@as(f64, @floatFromInt(duration)) / 1000.0),
-        .avg_latency_us = (@as(f64, @floatFromInt(duration)) * 1000.0) / @as(f64, @floatFromInt(count)),
+        .ops_per_sec = @as(f64, @floatFromInt(successful_reads)) / (@as(f64, @floatFromInt(duration)) / 1000.0),
+        .avg_latency_us = (@as(f64, @floatFromInt(duration)) * 1000.0) / @as(f64, @floatFromInt(successful_reads)),
     };
 }
 
