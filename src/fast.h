@@ -200,10 +200,14 @@ typedef struct {
 
 // Map entire file into memory for zero-copy access
 static inline MappedFile *mmap_file(int fd) {
-  // Get file size
-  off_t size = lseek(fd, 0, SEEK_END);
-  if (size == -1)
+  // Get file size using fstat (doesn't change file offset!)
+  struct stat st;
+  if (fstat(fd, &st) == -1)
     return NULL;
+  off_t size = st.st_size;
+
+  if (size == 0)
+    return NULL; // Empty file
 
   // Map file into memory
   void *addr = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
