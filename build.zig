@@ -112,6 +112,28 @@ pub fn build(b: *std.Build) void {
     const simple_bench_step = b.step("bench-simple", "Run simplified ZMDB vs SQLite benchmark");
     simple_bench_step.dependOn(&simple_bench_cmd.step);
     
+    // Profiling benchmark
+    const profile_bench_module = b.createModule(.{
+        .root_source_file = b.path("src/bench_profile.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    profile_bench_module.addImport("lib", zmdb_module);
+    
+    const profile_bench = b.addExecutable(.{
+        .name = "zmdb-profile",
+        .root_module = profile_bench_module,
+    });
+    profile_bench.linkLibC();
+    profile_bench.linkSystemLibrary("xxhash");
+    profile_bench.linkSystemLibrary("lz4");
+    profile_bench.addIncludePath(b.path("src"));
+    b.installArtifact(profile_bench);
+    
+    const profile_bench_cmd = b.addRunArtifact(profile_bench);
+    const profile_bench_step = b.step("bench-profile", "Run profiling benchmark");
+    profile_bench_step.dependOn(&profile_bench_cmd.step);
+    
     // Debug tool
     const debug_module = b.createModule(.{
         .root_source_file = b.path("src/debug_db.zig"),

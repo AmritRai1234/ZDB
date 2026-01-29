@@ -163,29 +163,29 @@ pub const Database = struct {
         const wal_file = self.wal orelse return error.Corruption;
         const fd = wal_file.handle;
         
-        // Calculate total size using key_len from index (single read!)
+        // OPTIMIZATION: Single buffered read for header + key + value
         const header_size = @sizeOf(RecordHeader);
         const total_size = header_size + entry.key_len + entry.size;
         
-        // Single pread syscall for entire record
+        // Allocate buffer for entire record
         var read_buf = try allocator.alloc(u8, total_size);
         defer allocator.free(read_buf);
         
+        // Single pread syscall for entire record
         const bytes_read = try std.posix.pread(fd, read_buf, entry.offset);
         if (bytes_read != total_size) return error.Corruption;
         
-        // Extract value (skip header + key)
+        // Extract value (skip header + key) - zero-copy slice
         const value_offset = header_size + entry.key_len;
-        const value = try allocator.dupe(u8, read_buf[value_offset..value_offset + entry.size]);
+        const value_slice = read_buf[value_offset..value_offset + entry.size];
         
         // Decompress if needed
         if (entry.compressed and self.config.compression) {
-            const decompressed = try decompress(allocator, value, entry.size);
-            allocator.free(value);
-            return decompressed;
+            return try decompress(allocator, value_slice, entry.size);
         }
         
-        return value;
+        // Return owned copy
+        return try allocator.dupe(u8, value_slice);
     }
     
     /// Delete a key-value pair
