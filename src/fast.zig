@@ -146,6 +146,26 @@ pub const MemPool = struct {
     }
 };
 
+/// Fast allocator using jemalloc
+pub const FastAllocator = struct {
+    /// Allocate memory using jemalloc
+    pub fn alloc(size: usize) ![]u8 {
+        const ptr = c.fast_alloc(size) orelse return error.OutOfMemory;
+        return @as([*]u8, @ptrCast(ptr))[0..size];
+    }
+    
+    /// Free memory
+    pub fn free(ptr: []u8) void {
+        c.fast_free(ptr.ptr);
+    }
+    
+    /// Reallocate memory
+    pub fn realloc(ptr: []u8, new_size: usize) ![]u8 {
+        const new_ptr = c.fast_realloc(ptr.ptr, new_size) orelse return error.OutOfMemory;
+        return @as([*]u8, @ptrCast(new_ptr))[0..new_size];
+    }
+};
+
 test "fast index" {
     var idx = try FastIndex.init(std.testing.allocator, 1024);
     defer idx.deinit();

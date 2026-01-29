@@ -236,4 +236,26 @@ static inline const void *mmap_read(MappedFile *mf, uint64_t offset,
   return (const char *)mf->addr + offset;
 }
 
+// jemalloc wrapper for faster allocations
+#ifdef USE_JEMALLOC
+#include <jemalloc/jemalloc.h>
+
+static inline void *fast_alloc(size_t size) { return je_malloc(size); }
+
+static inline void fast_free(void *ptr) { je_free(ptr); }
+
+static inline void *fast_realloc(void *ptr, size_t size) {
+  return je_realloc(ptr, size);
+}
+#else
+// Fallback to system malloc
+static inline void *fast_alloc(size_t size) { return malloc(size); }
+
+static inline void fast_free(void *ptr) { free(ptr); }
+
+static inline void *fast_realloc(void *ptr, size_t size) {
+  return realloc(ptr, size);
+}
+#endif
+
 #endif // ZMDB_FAST_H
