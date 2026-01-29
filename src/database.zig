@@ -209,6 +209,38 @@ pub const Database = struct {
         return try allocator.dupe(u8, value_slice);
     }
     
+    /// Get value as borrowed slice (zero-copy, only works with mmap)
+    /// Caller must NOT free the returned slice - it's borrowed from mmap!
+    pub fn getBorrowed(self: *Database, key: []const u8) ![]const u8 {
+        self.rwlock.lockShared();
+        defer self.rwlock.unlockShared();
+        
+        // Lookup in C hash table
+        const hash = std.hash.Wyhash.hash(0, key);
+        const c_entry = self.index.get(key, hash) orelse return error.NotFound;
+        
+        // Only works with uncompressed data and mmap
+        if (c_entry.compressed != 0) return error.Compressed;
+        if (self.mmap_wal == null) return error.MmapNotAvailable;
+        
+        const entry = Entry{
+            .offset = c_entry.offset,
+            .size = c_entry.size,
+            .key_len = c_entry.key_len,
+            .compressed = false,
+        };
+        
+        const header_size = @sizeOf(RecordHeader);
+        const total_size = header_size + entry.key_len + entry.size;
+        
+        // Zero-copy read from mmap
+        const data = self.mmap_wal.?.read(entry.offset, total_size) orelse return error.Corruption;
+        
+        // Return borrowed slice (no allocation!)
+        const value_offset = header_size + entry.key_len;
+        return data[value_offset..value_offset + entry.size];
+    }
+    
     /// Delete a key-value pair
     pub fn delete(self: *Database, key: []const u8) !void {
         self.rwlock.lock();  // Exclusive write lock
