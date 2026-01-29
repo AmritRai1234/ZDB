@@ -343,7 +343,7 @@ pub const SSTableWriter = struct {
         return .{
             .file = file,
             .allocator = allocator,
-            .entries = std.ArrayList(Entry).init(allocator),
+            .entries = std.ArrayList(Entry){},
             .bloom_filter = bloom_filter,
         };
     }
