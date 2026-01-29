@@ -370,7 +370,7 @@ pub const SSTableWriter = struct {
             .value = value_copy,
         });
         
-        self.bloom_filter.add(key);
+        self.bloom_filter.insert(key);
     }
     
     pub fn finish(self: *SSTableWriter) !void {
