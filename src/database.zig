@@ -1,10 +1,11 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const LRUCache = @import("cache.zig").LRUCache;
-const compress = @import("compression.zig").compress;
-const decompress = @import("compression.zig").decompress;
-const simd = @import("simd.zig");
+const cache = @import("cache.zig");
+const compression = @import("compression.zig");
 const WriteCombiningBuffer = @import("write_buffer.zig").WriteCombiningBuffer;
+const sstable = @import("sstable.zig");
+const compaction = @import("compaction.zig");
 const fast = @import("fast.zig");
 
 /// Database configuration options
@@ -39,6 +40,8 @@ pub const Database = struct {
     index: fast.FastIndex,  // C hash table for maximum performance
     wal: ?std.fs.File,
     mmap_wal: ?fast.MappedFile,  // Memory-mapped WAL for zero-copy reads
+    sstables: std.ArrayList(sstable.SSTable),  // Warm tier storage
+    compactor: compaction.Compactor,  // Battery-aware compaction
     rwlock: std.Thread.RwLock,
     cache: LRUCache([256]u8, []u8), // Cache for read optimization
     write_buffer: ?WriteCombiningBuffer, // High-performance write batching
@@ -85,6 +88,8 @@ pub const Database = struct {
             .index = try fast.FastIndex.init(allocator, 1024 * 1024),  // 1M capacity
             .wal = wal,
             .mmap_wal = null,  // Lazy-initialized on first read
+            .sstables = std.ArrayList(sstable.SSTable).init(allocator),
+            .compactor = compaction.Compactor.init(allocator),
             .rwlock = .{},
             .cache = LRUCache([256]u8, []u8).init(allocator, 256), // 256 entry cache
             .write_buffer = write_buffer,
@@ -115,6 +120,12 @@ pub const Database = struct {
         if (self.mmap_wal) |*mmap| {
             mmap.deinit();
         }
+        
+        // Clean up SSTables
+        for (self.sstables.items) |*sst| {
+            sst.deinit();
+        }
+        self.sstables.deinit();
         
         self.file.close();
         if (self.wal) |wal| {
