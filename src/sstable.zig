@@ -383,8 +383,6 @@ pub const SSTableWriter = struct {
         
         // Write data blocks
         const BLOCK_SIZE = 4096; // 4KB blocks
-        var block_buf = try self.allocator.alloc(u8, BLOCK_SIZE * 2); // Extra space for compression
-        defer self.allocator.free(block_buf);
         
         var sparse_index = SSTable.SparseIndex.init(self.allocator);
         defer sparse_index.deinit();
@@ -402,7 +400,6 @@ pub const SSTableWriter = struct {
             
             // If adding this entry would exceed block size, flush current block
             if (current_block.items.len + entry_size > BLOCK_SIZE and current_block.items.len > 0) {
-                const block_offset = try self.file.getPos();
                 try self.file.writeAll(current_block.items);
                 current_block.clearRetainingCapacity();
                 block_count += 1;
