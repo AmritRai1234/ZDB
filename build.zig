@@ -28,6 +28,9 @@ pub fn build(b: *std.Build) void {
     exe.linkLibC();
     exe.linkSystemLibrary("xxhash");
     exe.linkSystemLibrary("lz4");
+    
+    // Add include path for fast.h
+    exe.addIncludePath(b.path("src"));
     exe.linkSystemLibrary("jemalloc");
     
     b.installArtifact(exe);
