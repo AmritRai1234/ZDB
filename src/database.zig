@@ -127,7 +127,7 @@ pub const Database = struct {
         for (self.sstables.items) |*sst| {
             sst.deinit();
         }
-        self.sstables.deinit();
+        self.sstables.deinit(self.allocator);
         
         self.file.close();
         if (self.wal) |wal| {

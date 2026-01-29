@@ -79,7 +79,7 @@ pub const SSTable = struct {
             for (self.entries.items) |entry| {
                 self.allocator.free(entry.key);
             }
-            self.entries.deinit();
+            self.entries.deinit(self.allocator);
         }
         
         fn add(self: *SparseIndex, key: []const u8, offset: u64) !void {
