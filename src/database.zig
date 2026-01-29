@@ -51,6 +51,7 @@ pub const Database = struct {
     const Entry = struct {
         offset: u64,
         size: u32,
+        key_len: u16,  // Store key length to avoid double-read
         compressed: bool,
     };
     
@@ -133,6 +134,7 @@ pub const Database = struct {
         try self.index.put(key_copy, .{
             .offset = offset,
             .size = @intCast(value.len),
+            .key_len = @intCast(key.len),
             .compressed = self.config.compression,
         });
         
@@ -153,16 +155,11 @@ pub const Database = struct {
         const wal_file = self.wal orelse return error.Corruption;
         const fd = wal_file.handle;
         
-        // Read header first to get key length
+        // Calculate total size using key_len from index (single read!)
         const header_size = @sizeOf(RecordHeader);
-        var header_buf: [@sizeOf(RecordHeader)]u8 align(@alignOf(RecordHeader)) = undefined;
-        const header_bytes = try std.posix.pread(fd, &header_buf, entry.offset);
-        if (header_bytes != header_size) return error.Corruption;
+        const total_size = header_size + entry.key_len + entry.size;
         
-        const header = std.mem.bytesAsValue(RecordHeader, &header_buf).*;
-        
-        // Now read the full record (header + key + value)
-        const total_size = header_size + header.key_len + header.value_len;
+        // Single pread syscall for entire record
         var read_buf = try allocator.alloc(u8, total_size);
         defer allocator.free(read_buf);
         
@@ -170,8 +167,8 @@ pub const Database = struct {
         if (bytes_read != total_size) return error.Corruption;
         
         // Extract value (skip header + key)
-        const value_offset = header_size + header.key_len;
-        const value = try allocator.dupe(u8, read_buf[value_offset..value_offset + header.value_len]);
+        const value_offset = header_size + entry.key_len;
+        const value = try allocator.dupe(u8, read_buf[value_offset..value_offset + entry.size]);
         
         // Decompress if needed
         if (entry.compressed and self.config.compression) {
@@ -268,6 +265,7 @@ pub const Database = struct {
                 try self.index.put(key_buf, .{
                     .offset = offset,
                     .size = header.value_len,
+                    .key_len = header.key_len,
                     .compressed = (header.flags & 0x01) != 0,
                 });
             } else {
@@ -275,6 +273,7 @@ pub const Database = struct {
                 try self.index.put(key_buf, .{
                     .offset = offset,
                     .size = header.value_len,
+                    .key_len = header.key_len,
                     .compressed = (header.flags & 0x01) != 0,
                 });
             }
