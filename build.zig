@@ -136,24 +136,6 @@ pub fn build(b: *std.Build) void {
     const persist_step = b.step("test-persist", "Test data persistence");
     persist_step.dependOn(&persist_cmd.step);
     
-    // LSM benchmark
-    const lsm_bench_module = b.createModule(.{
-        .root_source_file = b.path("src/bench_lsm.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    lsm_bench_module.addImport("lsm", zmdb_module);
-    
-    const lsm_bench = b.addExecutable(.{
-        .name = "zmdb-lsm-bench",
-        .root_module = lsm_bench_module,
-    });
-    b.installArtifact(lsm_bench);
-    
-    const lsm_bench_cmd = b.addRunArtifact(lsm_bench);
-    const lsm_bench_step = b.step("bench-lsm", "Run LSM-Tree benchmark");
-    lsm_bench_step.dependOn(&lsm_bench_cmd.step);
-    
     // WebAssembly build
     const wasm_target = b.resolveTargetQuery(.{
         .cpu_arch = .wasm32,
