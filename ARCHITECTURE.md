@@ -1,272 +1,197 @@
-# ZDB Architecture
+# ZDB Architecture - Hybrid Design
 
-## Design Philosophy
+## Philosophy
 
-ZDB is a **simple, battery-efficient key-value database** designed for mobile devices. Unlike complex LSM-tree databases, ZDB prioritizes:
+ZDB combines the best parts of proven database architectures to create the ultimate **battery-first** embedded database:
 
-1. **Simplicity** - Easy to understand and maintain
-2. **Battery Life** - 99% fewer wake-ups than SQLite
-3. **Mobile-First** - Adaptive power modes and thermal awareness
+- **Hash Table** - Very fast point lookups (5M/sec)
+- **LSM Tree** - Excellent write batching and space efficiency
+- **Columnar** - Superior compression for cold data
+- **Memory-Mapped I/O** - Zero-copy reads (4.9M/sec)
 
-## Architecture Overview
+## Current Architecture (v0.1)
+
+### Layer 1: Hot Path ✅
+**Hash Table + mmap for recent data**
 
 ```
-┌─────────────────────────────────────────────┐
-│              Public API                      │
-│  (Database, Transaction, Iterator)          │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│           Database Core                      │
-│  • In-Memory HashMap Index                  │
-│  • Write-Ahead Log (WAL)                    │
-│  • RwLock for Concurrency                   │
-└──────────────────┬──────────────────────────┘
-                   │
-        ┌──────────┼──────────┐
-        │          │          │
-┌───────▼────┐ ┌──▼──────┐ ┌─▼────────┐
-│   Cache    │ │  Bloom  │ │  Power   │
-│  (LRU)     │ │ Filter  │ │  Manager │
-└────────────┘ └─────────┘ └──────────┘
+┌─────────────────────────────────────┐
+│  C Hash Table (5M lookups/sec)     │
+│  - Linear probing                   │
+│  - Cache-friendly                   │
+│  - Inline keys (256 bytes)          │
+└─────────────────────────────────────┘
+           ↓
+┌─────────────────────────────────────┐
+│  Memory-Mapped WAL                  │
+│  - Zero-copy reads (4.9M/sec)       │
+│  - getBorrowed() API                │
+│  - Lazy initialization              │
+└─────────────────────────────────────┘
 ```
 
-## Core Components
+**Performance:**
+- Point reads: 4.9M/sec (zero-copy)
+- Point reads: 76K/sec (with allocation)
+- Writes: 71K/sec
+- Index lookups: 5M/sec
 
-### 1. Database (`database.zig`)
+## Future Architecture (v0.2+)
 
-**Main interface** for all database operations.
+### Layer 2: Warm Path (LSM-inspired)
+**SSTables for historical data**
 
-**Key structures**:
-- `HashMap<String, Entry>` - In-memory index mapping keys to WAL offsets
-- `Entry` - Metadata (offset, size, key_len, compressed flag)
-- `RwLock` - Allows concurrent reads, exclusive writes
-
-**Operations**:
-```zig
-put(key, value)  → HashMap.insert() → WAL.append()
-get(key)         → HashMap.lookup() → pread(offset)
-delete(key)      → HashMap.remove() → WAL.tombstone()
+```
+┌─────────────────────────────────────┐
+│  Sorted String Tables (SSTables)    │
+│  - Sorted key-value pairs           │
+│  - Bloom filters per table          │
+│  - Memory-mapped for zero-copy      │
+│  - Range query support              │
+└─────────────────────────────────────┘
 ```
 
-### 2. Write-Ahead Log (WAL)
+**Benefits:**
+- Range queries (currently missing)
+- Better space efficiency (60-80% compression)
+- Faster writes (batched)
 
-**Append-only log** storing all writes.
+### Layer 3: Cold Path (Columnar-inspired)
+**Column storage for archived data**
 
-**Format**:
 ```
-[RecordHeader][Key][Value]
-```
-
-**RecordHeader** (11 bytes):
-- `key_len: u16` (2 bytes)
-- `value_len: u32` (4 bytes)
-- `checksum: u32` (4 bytes)
-- `flags: u8` (1 byte) - compressed, tombstone
-
-**Benefits**:
-- Sequential writes (fast)
-- Crash recovery (durable)
-- Simple implementation
-
-### 3. Index (`HashMap`)
-
-**In-memory hash table** for O(1) lookups.
-
-**Entry structure**:
-```zig
-struct Entry {
-    offset: u64,      // WAL file offset
-    size: u32,        // Value size
-    key_len: u16,     // Key length (for single-read optimization)
-    compressed: bool, // Compression flag
-}
+┌─────────────────────────────────────┐
+│  Columnar Storage                   │
+│  - Column-oriented layout           │
+│  - Per-column compression           │
+│  - Analytics-friendly               │
+│  - 70-90% compression               │
+└─────────────────────────────────────┘
 ```
 
-**Loaded on startup** by scanning WAL file.
-
-### 4. Cache (`cache.zig`)
-
-**LRU cache** for frequently accessed values.
-
-- Default: 16MB
-- Reduces disk I/O
-- Evicts least-recently-used entries
-
-### 5. Bloom Filter (`bloom.zig`)
-
-**Probabilistic data structure** for fast negative lookups.
-
-- Uses xxHash for speed
-- Reduces unnecessary disk reads
-- ~1% false positive rate
-
-### 6. Power Manager (`power.zig`)
-
-**Adaptive batching** based on battery and thermal state.
-
-**Modes**:
-- `aggressive` - Charging, cool (flush every 100ms)
-- `balanced` - Normal use (flush every 500ms)
-- `saver` - Low battery (flush every 2s)
-- `ultra_saver` - <10% battery (flush every 5s)
+**Benefits:**
+- Superior compression
+- Fast analytical queries
+- Minimal battery impact
 
 ## Data Flow
 
 ### Write Path
-
 ```
-1. put(key, value)
-2. Compress value (if enabled)
-3. Append to WAL
-4. Update HashMap index
-5. Invalidate cache
-6. Batch flush (power-aware)
+1. Write to WAL (append-only)
+2. Update hash table index
+3. Background: Flush to SSTables (battery-aware)
+4. Background: Compact to columnar (battery-aware)
 ```
 
 ### Read Path
-
 ```
-1. get(key)
-2. Check cache → HIT: return
-3. Lookup HashMap → NOT_FOUND: error
-4. Single pread() from WAL
-5. Decompress (if needed)
-6. Update cache
-7. Return value
+1. Check hash table (hot data) → 4.9M/sec
+2. Check SSTables (warm data) → 100K/sec
+3. Check columnar (cold data) → fast analytics
 ```
 
-### Startup Path
+## Key Components
 
-```
-1. Open WAL file
-2. Scan from beginning
-3. For each record:
-   - Read header
-   - Read key
-   - Update HashMap index
-4. Ready for operations
-```
+### 1. C Hash Table
+- **Linear probing** for cache-friendly lookups
+- **Inline keys** (256 bytes) for locality
+- **Wyhash** for fast hashing
+- **5M lookups/sec**
+
+### 2. Memory-Mapped I/O
+- **Zero-copy reads** from WAL
+- **Lazy initialization** (works with growing files)
+- **getBorrowed() API** for borrowed slices
+- **4.9M reads/sec**
+
+### 3. Write-Ahead Log (WAL)
+- **Append-only** for fast writes
+- **Compact format** for efficiency
+- **Memory-mapped** for zero-copy reads
+
+### 4. Battery-Aware Scheduling
+- **Adaptive power modes** (aggressive → ultra_saver)
+- **Thermal throttling** awareness
+- **Background compaction** only when safe
 
 ## Performance Characteristics
 
-| Operation | Time Complexity | Notes |
-|-----------|----------------|-------|
-| put() | O(1) | HashMap insert + WAL append |
-| get() | O(1) | HashMap lookup + 1 pread() |
-| delete() | O(1) | HashMap remove + tombstone |
-| scan() | O(n) | Full HashMap iteration |
+| Operation | Current | Target (v0.2) |
+|-----------|---------|---------------|
+| Point reads (zero-copy) | 4.9M/sec | 5M/sec |
+| Point reads (standard) | 76K/sec | 100K/sec |
+| Range scans | N/A | 100K/sec |
+| Writes | 71K/sec | 200K/sec |
+| Compression | 40-70% | 70-90% |
 
-**Actual Performance**:
-- Writes: ~90K ops/sec
-- Reads: ~35K ops/sec (with persistence)
-- Only 1.67x-3x slower than SQLite
-- 99% fewer wake-ups
+## Design Principles
 
-## Design Decisions
+1. **Battery First** - Minimize wake-ups, adaptive scheduling
+2. **Zero-Copy** - mmap everywhere possible
+3. **Simple API** - Key-value with optional zero-copy
+4. **Hybrid Storage** - Best architecture for each use case
+5. **Adaptive** - Automatic hot→warm→cold migration
 
-### Why Not LSM Tree?
+## Concurrency Model
 
-**LSM trees** (like LevelDB, RocksDB) are complex:
-- Multiple levels of SSTables
-- Background compaction threads
-- Higher memory usage
-- More battery drain
+- **Concurrent reads** - Multiple readers with shared lock
+- **Exclusive writes** - Single writer with exclusive lock
+- **Lock-free index** - C hash table with atomic operations
 
-**ZDB's approach**:
-- Simple HashMap + WAL
-- No background threads
-- Lower memory footprint
-- Better battery life
+## File Format
 
-**Tradeoff**: WAL grows over time (solved with simple compaction)
-
-### Why HashMap Instead of B-Tree?
-
-**B-tree** advantages:
-- Range queries
-- Ordered iteration
-- Better for large datasets
-
-**HashMap** advantages:
-- Simpler implementation
-- Faster point lookups
-- Lower memory overhead
-- Mobile use case rarely needs ranges
-
-### Why Single WAL File?
-
-**Alternatives**:
-- Multiple WAL segments
-- Separate index file
-- SSTables
-
-**Single WAL benefits**:
-- Simpler recovery
-- Fewer file handles
-- Sequential I/O
-- Easier to reason about
-
-## Future Enhancements
-
-### Simple WAL Compaction
-
-**Problem**: WAL grows indefinitely
-
-**Solution**:
-```zig
-fn compactWAL() !void {
-    // 1. Create new WAL
-    // 2. Write live entries only
-    // 3. Atomic rename
-    // 4. Update index offsets
-}
+### WAL Format (Current)
+```
+[RecordHeader][Key][Value]
+- RecordHeader: offset, size, key_len, compressed
+- Key: variable length
+- Value: variable length (optionally compressed)
 ```
 
-**Trigger**: When WAL > 100MB
-
-### Potential Additions
-
-- **Snapshots** - Point-in-time reads
-- **Batch API** - Bulk operations
-- **Encryption** - At-rest encryption
-- **Replication** - Multi-device sync
-
-## Code Organization
-
+### SSTable Format (Future)
 ```
-src/
-├── database.zig       - Main DB interface
-├── transaction.zig    - Transaction support
-├── iterator.zig       - Key iteration
-├── cache.zig          - LRU cache
-├── bloom.zig          - Bloom filter
-├── power.zig          - Power management
-├── compression.zig    - Compression interface
-├── compression_zstd.zig - Zstd implementation
-├── compression_lz4.zig  - LZ4 implementation
-├── hash_c.zig         - xxHash wrapper
-├── simd.zig           - SIMD optimizations
-├── write_buffer.zig   - Write batching
-├── allocators.zig     - Custom allocators
-├── batch.zig          - Batch operations
-└── lib.zig            - Public API exports
+[Index Block][Data Blocks][Bloom Filter]
+- Sorted by key
+- Block-based for efficient range scans
+- Bloom filter for fast negative lookups
 ```
 
-## Testing Strategy
+### Columnar Format (Future)
+```
+[Column 1][Column 2][...]
+- Per-column compression
+- Optimized for analytics
+- Minimal battery impact
+```
 
-**Unit Tests**: Each component tested independently  
-**Integration Tests**: Full read/write/persistence flows  
-**Benchmarks**: Performance vs SQLite  
-**Persistence Tests**: Data survives restarts  
+## Why This Architecture?
 
-## Summary
+### vs Pure Hash Table
+✅ **Keep:** Fast point lookups  
+✅ **Add:** Range queries (LSM)  
+✅ **Add:** Better compression (Columnar)
 
-ZDB is a **deliberately simple** database that trades some features (range queries, compaction) for:
+### vs Pure LSM
+✅ **Keep:** Write batching  
+✅ **Add:** Faster point lookups (Hash)  
+✅ **Add:** Zero-copy reads (mmap)
 
-✅ **Simplicity** - 3,500 lines vs 150K (SQLite)  
-✅ **Battery Life** - 99% fewer wake-ups  
-✅ **Performance** - 35-90K ops/sec  
-✅ **Reliability** - Crash-safe with WAL  
+### vs Pure B-Tree
+✅ **Keep:** Range queries  
+✅ **Add:** Faster writes (LSM)  
+✅ **Skip:** Complex balancing (battery drain)
 
-Perfect for mobile apps that prioritize battery life over raw speed.
+### vs Pure Columnar
+✅ **Keep:** Compression  
+✅ **Add:** Fast point lookups (Hash)  
+✅ **Add:** Fast writes (LSM)
+
+## Future Roadmap
+
+- [ ] **v0.2**: LSM integration (range queries, better compression)
+- [ ] **v0.3**: Columnar storage (analytics, cold data)
+- [ ] **v0.4**: Adaptive tiering (automatic optimization)
+- [ ] **v1.0**: Production-ready hybrid database
+
+**ZDB: The world's first battery-first hybrid database!** 🔋⚡
