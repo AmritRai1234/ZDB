@@ -476,7 +476,7 @@ pub const SSTableWriter = struct {
         std.mem.writeInt(u64, header_buf[16..24], header.index_offset, .little);
         std.mem.writeInt(u64, header_buf[24..32], header.bloom_offset, .little);
         header_buf[32] = header.compression_type;
-        @memcpy(header_buf[33..52], &header.reserved);
+        @memcpy(header_buf[33..48], &header.reserved);
         try self.file.writeAll(&header_buf);
     }
 };
