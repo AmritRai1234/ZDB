@@ -469,14 +469,14 @@ pub const SSTableWriter = struct {
         var magic_buf: [8]u8 = undefined;
         std.mem.writeInt(u64, &magic_buf, header.magic, .little);
         try self.file.writeAll(&magic_buf);
-        var header_buf: [48]u8 = undefined;
+        var header_buf: [52]u8 = undefined; // 4 + 8 + 4 + 8 + 8 + 1 + 19 = 52
         std.mem.writeInt(u32, header_buf[0..4], header.version, .little);
         std.mem.writeInt(u64, header_buf[4..12], header.key_count, .little);
         std.mem.writeInt(u32, header_buf[12..16], header.data_blocks_count, .little);
         std.mem.writeInt(u64, header_buf[16..24], header.index_offset, .little);
         std.mem.writeInt(u64, header_buf[24..32], header.bloom_offset, .little);
         header_buf[32] = header.compression_type;
-        @memcpy(header_buf[33..48], &header.reserved);
+        @memcpy(header_buf[33..52], &header.reserved);
         try self.file.writeAll(&header_buf);
     }
 };
