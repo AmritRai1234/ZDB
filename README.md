@@ -1,268 +1,91 @@
-# ZMDB - The Most Battery-Efficient Database 🔋
+# 🔋 ZDB - Battery-First Database
 
-[![GitHub](https://img.shields.io/badge/GitHub-ZDB-blue)](https://github.com/AmritRai1234/ZDB)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Zig](https://img.shields.io/badge/Zig-0.13-orange.svg)](https://ziglang.org/)
+**A high-performance embedded database designed for mobile devices and battery efficiency.**
 
-# ZMDB - Zero-Malloc Database
+ZDB is built from the ground up with a unique vision: **optimize for battery life first, speed second**. It's not trying to be the fastest database - it's trying to be the smartest about power consumption while still delivering excellent performance.
 
-A **battery-first**, embedded key-value database built in Zig, optimized for mobile devices and resource-constrained environments.
+## 🎯 Philosophy
 
-## 🚀 Performance
+Traditional databases optimize for raw throughput. ZDB optimizes for:
+- **Battery efficiency** - Adaptive power modes, write batching, minimal wake-ups
+- **Storage efficiency** - Real compression (40-70% savings)
+- **Developer experience** - Simple, clean API with powerful features
 
-**60% of SQLite's speed** while using **99% fewer wake-ups** and **40-70% less storage**!
+## ✨ Features
 
-```
-Benchmark Results (10,000 operations):
-┌─────────────┬──────────────┬──────────────┬──────────┐
-│ Operation   │ ZMDB         │ SQLite       │ Ratio    │
-├─────────────┼──────────────┼──────────────┼──────────┤
-│ Writes      │ 96,154/sec   │ 769,231/sec  │ 8.0x     │
-│ Reads       │ 71,429/sec   │ 119,048/sec  │ 1.67x    │
-└─────────────┴──────────────┴──────────────┴──────────┘
-```
+### � Battery-First Design
+- Adaptive power modes (aggressive → balanced → ultra_saver)
+- Write batching reduces syscalls and wake-ups
+- Blocked bloom filters for cache efficiency
 
-**Key Optimizations:**
-- ✅ xxHash (10-20x faster than standard hashing)
-- ✅ RwLock for concurrent reads
-- ✅ Zero-allocation hot paths
-- ✅ Single-syscall reads (pread)
-- ✅ 16MB adaptive cache
-- ✅ Blocked bloom filters
+### ⚡ Zero-Copy Performance
+- Memory-mapped I/O for instant reads
+- `getBorrowed()` API for zero-allocation reads (4.9M ops/sec)
+- C-optimized hash table (5M lookups/sec)
 
-## ⚡ Why ZMDB?
+### 💾 Storage Efficiency
+- Built-in zstd compression (40-70% savings)
+- Compact WAL format
+- Efficient index structure
 
-### Battery Life First
-- **99% fewer wake-ups** than traditional databases
-- **Adaptive power modes** (aggressive → ultra_saver)
-- **Smart batching** reduces I/O operations
-- **Compression** reduces storage and I/O
-
-### Mobile-Optimized
-- **40-70% smaller** storage with zstd compression
-- **Thermal throttling** awareness
-- **Battery-aware** flush policies
-- **Cache-friendly** data structures
-- 📦 **60x simpler** codebase (2.5K vs 150K LOC)
-- 🚀 **10-20x smaller** binary (~100KB vs 1-2MB)
-
-## 📊 Battery Comparison
-
-| Scenario | SQLite Wake-ups | ZMDB Wake-ups | Improvement |
-|----------|----------------|---------------|-------------|
-| **Charging** | 100 | 6 | **94% less** |
-| **Normal Use** | 100 | 2 | **98% less** |
-| **Low Battery** | 100 | 1 | **99% less** |
-| **Idle** | Background | 0 | **100% less** |
-
-**Real-world impact**: For an app with 10K writes/day:
-- SQLite: ~5-10% battery drain
-- ZMDB: ~0.05-0.1% battery drain
-
-**100x better battery life!** 🔋⚡
+### 🎨 Developer Experience
+- Simple key-value API
+- Thread-safe operations (concurrent reads, exclusive writes)
+- Zero-copy reads when you need them
 
 ## 🚀 Quick Start
 
-```bash
-# Clone the repository
-git clone https://github.com/AmritRai1234/ZDB.git
-cd ZDB
+```zig
+const Database = @import("database.zig").Database;
 
-# Run tests
-zig build test
+var db = try Database.init(allocator, "mydb.db", .{});
+defer db.deinit();
 
-# Run battery efficiency benchmark
-zig build bench-battery
+// Write
+try db.put("user:123", "Alice");
 
-# Build for Android
-./build_android.sh
+// Read (owned copy)
+const value = try db.get("user:123", allocator);
+defer allocator.free(value);
 
-# Build for iOS
-./build_ios.sh
+// Read (zero-copy, borrowed from mmap)
+const borrowed = try db.getBorrowed("user:123");
+// Don't free borrowed slices!
 ```
 
-## 🌐 Browser Usage (WebAssembly)
+## � Performance
 
-ZMDB now runs in web browsers via WebAssembly!
-
-```bash
-# Build WASM module
-zig build build-wasm
-
-# Start demo server
-python3 serve.py
-
-# Open http://localhost:8080/wasm/
-```
-
-### JavaScript API
-
-```javascript
-// Load and initialize
-const db = await ZMDB.load('./zmdb.wasm');
-await db.open('mydb', { 
-    cacheSize: 4 * 1024 * 1024,
-    compression: false 
-});
-
-// Store data
-await db.put('user:123', JSON.stringify({ name: 'Alice', age: 30 }));
-
-// Retrieve data
-const userData = await db.get('user:123');
-console.log(JSON.parse(userData));
-
-// Check existence
-const exists = await db.contains('user:123'); // true
-
-// Delete
-await db.delete('user:123');
-
-// Get stats
-const stats = await db.getStats();
-console.log(`Total keys: ${stats.totalKeys}`);
-
-// Close
-db.close();
-```
-
-### Browser Features
-
-- ✅ **In-memory storage** (677KB WASM module)
-- ✅ **Promise-based API** for async operations
-- ✅ **Zero dependencies** - pure JavaScript wrapper
-- ✅ **TypeScript-friendly** API design
-- ⚠️ **No persistence** yet (IndexedDB integration coming soon)
-- ⚠️ **No power management** (browser limitations)
-
-## 🔋 Power Modes
-
-ZMDB automatically adapts to your device's power state:
-
-### 1. Aggressive Mode (Charging)
-- 16KB batch size
-- 1-minute compaction
-- All background work enabled
-
-### 2. Balanced Mode (Normal)
-- 64KB batch size
-- 5-minute compaction
-- Background work when cool
-
-### 3. Saver Mode (Low Battery)
-- 256KB batch size
-- 30-minute compaction
-- Defer all background work
-
-### 4. Deep Sleep Mode (Idle)
-- 1MB batch size
-- 24-hour compaction
-- **0% battery drain**
+| Operation | Throughput |
+|-----------|------------|
+| Writes | 71K ops/sec |
+| Reads (standard) | 76K ops/sec |
+| Reads (zero-copy) | **4.9M ops/sec** ⚡ |
+| Index lookups | 5M ops/sec |
 
 ## 🏗️ Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│          99% FEWER WAKE-UPS THAN SQLITE 🔋              │
-├─────────────────────────────────────────────────────────┤
-│  PowerManager (4 adaptive modes)                        │
-│  LSM-Tree (SkipList + Bloom + SSTable)                 │
-│  Page Cache (4MB LRU + prefetch)                       │
-│  mmap I/O (zero-copy)                                  │
-│  Lock-free HashMap (epoch-based)                       │
-│  SIMD (ARM NEON + x86 SSE2)                            │
-│  Write Buffer (64KB batching)                          │
-│  Adaptive Compression (zstd)                           │
-└─────────────────────────────────────────────────────────┘
-```
+- **C Hash Table**: Linear probing for cache-friendly lookups
+- **Memory-Mapped I/O**: Zero-copy reads from WAL
+- **Write Batching**: Reduces syscalls and power consumption
+- **Adaptive Compression**: zstd for values when beneficial
 
-## 📱 Perfect For
-
-- Mobile apps (iOS, Android)
-- Battery-sensitive applications
-- Offline-first apps
-- Thermally-constrained devices
-- IoT and embedded systems
-- Privacy-focused applications
-
-## 🎯 ZMDB vs SQLite
-
-| Feature | ZMDB | SQLite |
-|---------|------|--------|
-| **Battery Efficiency** | ✅ 99% fewer wake-ups | ❌ Frequent wake-ups |
-| **Thermal Awareness** | ✅ Built-in | ❌ None |
-| **Charging Detection** | ✅ Adaptive | ❌ None |
-| **Code Simplicity** | ✅ 2.5K LOC | ❌ 150K LOC |
-| **Binary Size** | ✅ ~100KB | ❌ 1-2MB |
-| **Raw Speed** | 110K writes/sec | ✅ 625K writes/sec |
-| **SQL Support** | KV only | ✅ Full SQL |
-
-**Choose ZMDB** for mobile apps where battery life matters.  
-**Choose SQLite** for desktop apps or complex SQL queries.
-
-## 📦 Features
-
-### Core
-- ✅ Key-value storage
-- ✅ WAL + Transactions
-- ✅ B-tree indexing
-- ✅ MVCC concurrency
-- ✅ Background compaction
-
-### Performance
-- ✅ LSM-Tree architecture
-- ✅ Bloom filters
-- ✅ Page cache (4MB LRU)
-- ✅ mmap I/O (zero-copy)
-- ✅ Lock-free HashMap
-- ✅ SIMD vectorization
-- ✅ Write buffer (64KB)
-- ✅ Adaptive compression
-
-### Battery Optimizations
-- ✅ PowerManager (4 modes)
-- ✅ Charging detection
-- ✅ Thermal throttling
-- ✅ Battery monitoring
-- ✅ Dynamic batching
-- ✅ Deep sleep mode
-
-## 🧪 Testing
+## 🛠️ Building
 
 ```bash
-# Run all tests
+zig build
 zig build test
-
-# Run battery benchmark
-zig build bench-battery
-
-# Run SQLite comparison
-zig build bench-sqlite
+zig build bench-simple     # Standard benchmark
+zig build bench-zerocopy   # Zero-copy performance
 ```
 
-**Test Status**: 18/19 passing (95%)
+## 🎯 Use Cases
 
-## 📖 Documentation
+Perfect for:
+- Mobile applications (iOS, Android)
+- Embedded systems
+- Battery-powered devices
+- Applications that need fast reads with minimal power draw
 
-- [Website](https://amritrai1234.github.io/ZDB/)
-- [Battery Optimization Guide](docs/battery.md)
-- [Architecture Overview](docs/architecture.md)
-- [API Reference](docs/api.md)
+## 📜 License
 
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## 🌟 Show Your Support
-
-If ZMDB helps your app save battery, give it a ⭐ on GitHub!
-
----
-
-**Built with ❤️ in Zig**
-
-[Website](https://amritrai1234.github.io/ZDB/) • [GitHub](https://github.com/AmritRai1234/ZDB) • [Issues](https://github.com/AmritRai1234/ZDB/issues)
+MIT
