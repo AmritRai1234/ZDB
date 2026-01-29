@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 // Ultra-fast index entry lookup using linear probing hash table
@@ -206,7 +207,10 @@ static inline MappedFile *mmap_file(int fd) {
 
   // Map file into memory
   void *addr = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
-  if (addr == MAP_FAILED)
+
+  // Check for mmap failure (avoid Zig C translation issues)
+  intptr_t addr_int = (intptr_t)addr;
+  if (addr_int == 0 || addr_int == -1)
     return NULL;
 
   // Advise kernel about access pattern
