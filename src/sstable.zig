@@ -353,7 +353,7 @@ pub const SSTableWriter = struct {
             self.allocator.free(entry.key);
             self.allocator.free(entry.value);
         }
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
         self.bloom_filter.deinit();
         self.file.close();
     }
@@ -365,7 +365,7 @@ pub const SSTableWriter = struct {
         const value_copy = try self.allocator.dupe(u8, value);
         errdefer self.allocator.free(value_copy);
         
-        try self.entries.append(.{
+        try self.entries.append(self.allocator, .{
             .key = key_copy,
             .value = value_copy,
         });
