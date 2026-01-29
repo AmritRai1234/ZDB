@@ -102,6 +102,26 @@ pub fn fastWalRead(
     if (result != 0) return error.ReadFailed;
 }
 
+/// Memory-mapped file for zero-copy reads
+pub const MappedFile = struct {
+    c_mf: *c.MappedFile,
+    
+    pub fn init(fd: std.posix.fd_t) !MappedFile {
+        const c_mf = c.mmap_file(fd) orelse return error.MmapFailed;
+        return .{ .c_mf = c_mf };
+    }
+    
+    pub fn deinit(self: *MappedFile) void {
+        c.munmap_file(self.c_mf);
+    }
+    
+    /// Zero-copy read from mapped file
+    pub fn read(self: *MappedFile, offset: u64, size: usize) ?[]const u8 {
+        const ptr = c.mmap_read(self.c_mf, offset, size) orelse return null;
+        return @as([*]const u8, @ptrCast(ptr))[0..size];
+    }
+};
+
 /// Memory pool for fast allocations
 pub const MemPool = struct {
     c_pool: *c.MemPool,
