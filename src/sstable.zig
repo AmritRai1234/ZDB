@@ -60,7 +60,7 @@ pub const SSTable = struct {
     };
     
     const SparseIndex = struct {
-        entries: []IndexEntry,
+        entries: std.ArrayList(IndexEntry),
         allocator: Allocator,
         
         const IndexEntry = struct {
@@ -70,41 +70,39 @@ pub const SSTable = struct {
         
         fn init(allocator: Allocator) SparseIndex {
             return .{
-                .entries = &[_]IndexEntry{},
+                .entries = std.ArrayList(IndexEntry).init(allocator),
                 .allocator = allocator,
             };
         }
         
         fn deinit(self: *SparseIndex) void {
-            for (self.entries) |entry| {
+            for (self.entries.items) |entry| {
                 self.allocator.free(entry.key);
             }
-            self.allocator.free(self.entries);
+            self.entries.deinit();
         }
         
         fn add(self: *SparseIndex, key: []const u8, offset: u64) !void {
             const key_copy = try self.allocator.dupe(u8, key);
             errdefer self.allocator.free(key_copy);
             
-            const new_entries = try self.allocator.realloc(self.entries, self.entries.len + 1);
-            self.entries = new_entries;
-            self.entries[self.entries.len - 1] = .{
+            try self.entries.append(.{
                 .key = key_copy,
                 .offset = offset,
-            };
+            });
         }
         
         /// Find the block that might contain the key
         fn findBlock(self: *const SparseIndex, key: []const u8) ?u64 {
-            if (self.entries.len == 0) return null;
+            if (self.entries.items.len == 0) return null;
             
             // Binary search for the largest key <= target
             var left: usize = 0;
-            var right: usize = self.entries.len;
+            var right: usize = self.entries.items.len;
             
             while (left < right) {
                 const mid = left + (right - left) / 2;
-                const cmp = std.mem.order(u8, self.entries[mid].key, key);
+                const cmp = std.mem.order(u8, self.entries.items[mid].key, key);
                 
                 if (cmp == .lt) {
                     left = mid + 1;
@@ -113,8 +111,8 @@ pub const SSTable = struct {
                 }
             }
             
-            if (left == 0) return self.entries[0].offset;
-            return self.entries[left - 1].offset;
+            if (left == 0) return self.entries.items[0].offset;
+            return self.entries.items[left - 1].offset;
         }
     };
     
@@ -137,7 +135,21 @@ pub const SSTable = struct {
         var index = SparseIndex.init(allocator);
         errdefer index.deinit();
         
-        // TODO: Read index entries
+        const num_index_entries = try file.reader().readInt(u64, .little);
+        var i: usize = 0;
+        while (i < num_index_entries) : (i += 1) {
+            const key_len = try file.reader().readInt(u32, .little);
+            const key = try allocator.alloc(u8, key_len);
+            errdefer allocator.free(key);
+            
+            try file.reader().readNoEof(key);
+            const offset = try file.reader().readInt(u64, .little);
+            
+            try index.entries.append(.{
+                .key = key,
+                .offset = offset,
+            });
+        }
         
         // Load bloom filter
         var bloom_filter: ?bloom.BloomFilter = null;
@@ -277,11 +289,63 @@ pub const SSTableWriter = struct {
         }.lessThan);
         
         // Write data blocks
-        // TODO: Implement block writing
+        const BLOCK_SIZE = 4096; // 4KB blocks
+        var block_buf = try self.allocator.alloc(u8, BLOCK_SIZE * 2); // Extra space for compression
+        defer self.allocator.free(block_buf);
+        
+        var sparse_index = SSTable.SparseIndex.init(self.allocator);
+        defer sparse_index.deinit();
+        
+        var current_block = std.ArrayList(u8).init(self.allocator);
+        defer current_block.deinit();
+        
+        var block_count: u32 = 0;
+        var entries_in_block: usize = 0;
+        const SPARSE_INDEX_INTERVAL = 1000; // Index every 1000 keys
+        
+        for (self.entries.items, 0..) |entry, i| {
+            // Calculate entry size: key_len(4) + value_len(4) + key + value
+            const entry_size = 4 + 4 + entry.key.len + entry.value.len;
+            
+            // If adding this entry would exceed block size, flush current block
+            if (current_block.items.len + entry_size > BLOCK_SIZE and current_block.items.len > 0) {
+                const block_offset = try self.file.getPos();
+                try self.file.writeAll(current_block.items);
+                current_block.clearRetainingCapacity();
+                block_count += 1;
+                entries_in_block = 0;
+            }
+            
+            // Add to sparse index every N entries
+            if (i % SPARSE_INDEX_INTERVAL == 0) {
+                const offset = try self.file.getPos();
+                try sparse_index.add(entry.key, offset);
+            }
+            
+            // Write entry to current block
+            var writer = current_block.writer();
+            try writer.writeInt(u32, @intCast(entry.key.len), .little);
+            try writer.writeInt(u32, @intCast(entry.value.len), .little);
+            try writer.writeAll(entry.key);
+            try writer.writeAll(entry.value);
+            
+            entries_in_block += 1;
+        }
+        
+        // Flush last block
+        if (current_block.items.len > 0) {
+            try self.file.writeAll(current_block.items);
+            block_count += 1;
+        }
         
         // Write sparse index
         const index_offset = try self.file.getPos();
-        // TODO: Write index
+        try self.file.writeInt(u64, sparse_index.entries.items.len, .little);
+        for (sparse_index.entries.items) |entry| {
+            try self.file.writeInt(u32, @intCast(entry.key.len), .little);
+            try self.file.writeAll(entry.key);
+            try self.file.writeInt(u64, entry.offset, .little);
+        }
         
         // Write bloom filter
         const bloom_offset = try self.file.getPos();
@@ -292,7 +356,7 @@ pub const SSTableWriter = struct {
             .magic = SSTable.Header.MAGIC,
             .version = SSTable.Header.VERSION,
             .key_count = self.entries.items.len,
-            .data_blocks_count = 0, // TODO
+            .data_blocks_count = block_count,
             .index_offset = index_offset,
             .bloom_offset = bloom_offset,
             .compression_type = 0,
