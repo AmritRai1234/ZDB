@@ -136,18 +136,18 @@ pub const SSTable = struct {
         errdefer index.deinit();
         
         var buf: [8]u8 = undefined;
-        try file.readNoEof(&buf);
+        _ = try file.readAll(&buf);
         const num_index_entries = std.mem.readInt(u64, &buf, .little);
         var i: usize = 0;
         while (i < num_index_entries) : (i += 1) {
             var key_len_buf: [4]u8 = undefined;
-            try file.readNoEof(&key_len_buf);
+            _ = try file.readAll(&key_len_buf);
             const key_len = std.mem.readInt(u32, &key_len_buf, .little);
             const key = try allocator.alloc(u8, key_len);
             errdefer allocator.free(key);
             
-            try file.readNoEof(key);
-            try file.readNoEof(&buf);
+            _ = try file.readAll(key);
+            _ = try file.readAll(&buf);
             const offset = std.mem.readInt(u64, &buf, .little);
             
             try index.entries.append(allocator, .{
@@ -161,9 +161,9 @@ pub const SSTable = struct {
         if (header.bloom_offset > 0) {
             try file.seekTo(header.bloom_offset);
             // Read bloom filter metadata
-            try file.readNoEof(&buf);
+            _ = try file.readAll(&buf);
             const num_bits = std.mem.readInt(u64, &buf, .little);
-            try file.readNoEof(&buf);
+            _ = try file.readAll(&buf);
             const num_hashes = std.mem.readInt(u64, &buf, .little);
             
             const num_blocks = num_bits / 512;
@@ -173,7 +173,7 @@ pub const SSTable = struct {
             // Read bloom filter data
             const blocks_bytes = try allocator.alloc(u8, num_blocks * @sizeOf(bloom.BloomFilter.Block));
             defer allocator.free(blocks_bytes);
-            try file.readNoEof(blocks_bytes);
+            _ = try file.readAll(blocks_bytes);
             @memcpy(std.mem.sliceAsBytes(bf.blocks), blocks_bytes);
             
             bloom_filter = bf;
