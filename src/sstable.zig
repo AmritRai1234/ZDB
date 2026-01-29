@@ -466,7 +466,9 @@ pub const SSTableWriter = struct {
         
         try self.file.seekTo(0);
         // Write header directly
-        try self.file.writeAll(&header.magic);
+        var magic_buf: [8]u8 = undefined;
+        std.mem.writeInt(u64, &magic_buf, header.magic, .little);
+        try self.file.writeAll(&magic_buf);
         var header_buf: [48]u8 = undefined;
         std.mem.writeInt(u32, header_buf[0..4], header.version, .little);
         std.mem.writeInt(u64, header_buf[4..12], header.key_count, .little);
