@@ -413,7 +413,7 @@ pub const SSTableWriter = struct {
             }
             
             // Write entry to current block
-            var writer = current_block.writer();
+            var writer = current_block.writer(self.allocator);
             try writer.writeInt(u32, @intCast(entry.key.len), .little);
             try writer.writeInt(u32, @intCast(entry.value.len), .little);
             try writer.writeAll(entry.key);
