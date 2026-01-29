@@ -170,7 +170,7 @@ ZMDB automatically adapts to your device's power state:
 │  Page Cache (4MB LRU + prefetch)                       │
 │  mmap I/O (zero-copy)                                  │
 │  Lock-free HashMap (epoch-based)                       │
-│  SIMD (ARM NEON + x86 SSE2)                           │
+│  SIMD (ARM NEON + x86 SSE2)                            │
 │  Write Buffer (64KB batching)                          │
 │  Adaptive Compression (zstd)                           │
 └─────────────────────────────────────────────────────────┘
