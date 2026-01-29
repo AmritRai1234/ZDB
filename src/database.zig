@@ -259,23 +259,24 @@ pub const Database = struct {
             }
             
             // Add to index (or update if exists)
-            if (self.index.get(key_buf)) |_| {
-                // Key exists, free the new buffer and update entry
+            const gop = try self.index.getOrPut(key_buf);
+            if (gop.found_existing) {
+                // Key already exists, free the new buffer and update entry
                 self.allocator.free(key_buf);
-                try self.index.put(key_buf, .{
+                gop.value_ptr.* = .{
                     .offset = offset,
                     .size = header.value_len,
                     .key_len = header.key_len,
                     .compressed = (header.flags & 0x01) != 0,
-                });
+                };
             } else {
-                // New key, add to index
-                try self.index.put(key_buf, .{
+                // New key, set the entry
+                gop.value_ptr.* = .{
                     .offset = offset,
                     .size = header.value_len,
                     .key_len = header.key_len,
                     .compressed = (header.flags & 0x01) != 0,
-                });
+                };
             }
             
             // Move to next record
