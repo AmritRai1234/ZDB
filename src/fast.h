@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 // Ultra-fast index entry lookup using linear probing hash table
@@ -10,6 +11,7 @@ typedef struct {
   uint64_t hash;
   uint64_t offset;
   uint32_t size;
+  uint16_t key_len; // Match Zig Entry struct
   uint8_t compressed;
   char key[256]; // Inline key storage for cache locality
 } IndexEntry;
@@ -29,6 +31,12 @@ static inline FastIndex *fast_index_init(size_t capacity) {
   return idx;
 }
 
+// Free fast index
+static inline void fast_index_free(FastIndex *idx) {
+  free(idx->entries);
+  free(idx);
+}
+
 // Fast hash-based lookup (linear probing, cache-friendly)
 static inline IndexEntry *fast_index_get(FastIndex *idx, const char *key,
                                          size_t key_len, uint64_t hash) {
@@ -44,7 +52,7 @@ static inline IndexEntry *fast_index_get(FastIndex *idx, const char *key,
       return NULL;
 
     // Hash match + key match = found
-    if (entry->hash == hash && key_len < 256 &&
+    if (entry->hash == hash && entry->key_len == key_len &&
         memcmp(entry->key, key, key_len) == 0) {
       return entry;
     }
@@ -55,6 +63,59 @@ static inline IndexEntry *fast_index_get(FastIndex *idx, const char *key,
 
   return NULL;
 }
+
+// Fast put operation
+static inline int fast_index_put(FastIndex *idx, const char *key,
+                                 size_t key_len, uint64_t hash, uint64_t offset,
+                                 uint32_t size, uint16_t stored_key_len,
+                                 uint8_t compressed) {
+  if (key_len >= 256)
+    return -1; // Key too long
+
+  size_t pos = hash % idx->capacity;
+  size_t original_pos = pos;
+
+  do {
+    IndexEntry *entry = &idx->entries[pos];
+
+    // Empty slot or matching key - insert/update here
+    if (entry->hash == 0 || (entry->hash == hash && entry->key_len == key_len &&
+                             memcmp(entry->key, key, key_len) == 0)) {
+
+      entry->hash = hash;
+      entry->offset = offset;
+      entry->size = size;
+      entry->key_len = stored_key_len;
+      entry->compressed = compressed;
+      memcpy(entry->key, key, key_len);
+      entry->key[key_len] = '\0';
+
+      idx->count++;
+      return 0;
+    }
+
+    // Next probe
+    pos = (pos + 1) % idx->capacity;
+  } while (pos != original_pos);
+
+  return -1; // Table full
+}
+
+// Fast delete operation
+static inline int fast_index_delete(FastIndex *idx, const char *key,
+                                    size_t key_len, uint64_t hash) {
+  IndexEntry *entry = fast_index_get(idx, key, key_len, hash);
+  if (entry == NULL)
+    return -1;
+
+  // Mark as deleted by zeroing hash
+  entry->hash = 0;
+  idx->count--;
+  return 0;
+}
+
+// Get count
+static inline size_t fast_index_count(FastIndex *idx) { return idx->count; }
 
 // Fast WAL read - optimized for sequential access
 static inline int fast_wal_read(int fd, uint64_t offset, void *header_buf,

@@ -21,13 +21,63 @@ pub const FastIndex = struct {
     }
     
     pub fn deinit(self: *FastIndex) void {
-        c.free(self.c_index.*.entries);
-        c.free(self.c_index);
+        c.fast_index_free(self.c_index);
     }
     
     /// Ultra-fast lookup using C implementation
     pub fn get(self: *FastIndex, key: []const u8, hash: u64) ?*c.IndexEntry {
         return c.fast_index_get(self.c_index, key.ptr, key.len, hash);
+    }
+    
+    /// Fast put operation
+    pub fn put(self: *FastIndex, key: []const u8, hash: u64, offset: u64, size: u32, key_len: u16, compressed: bool) !void {
+        const result = c.fast_index_put(
+            self.c_index,
+            key.ptr,
+            key.len,
+            hash,
+            offset,
+            size,
+            key_len,
+            if (compressed) 1 else 0,
+        );
+        if (result != 0) return error.IndexFull;
+    }
+    
+    /// Fast delete operation
+    pub fn delete(self: *FastIndex, key: []const u8, hash: u64) !void {
+        const result = c.fast_index_delete(self.c_index, key.ptr, key.len, hash);
+        if (result != 0) return error.NotFound;
+    }
+    
+    /// Get count
+    pub fn count(self: *FastIndex) usize {
+        return c.fast_index_count(self.c_index);
+    }
+    
+    /// Iterator for scanning all entries
+    pub const Iterator = struct {
+        index: *FastIndex,
+        pos: usize,
+        
+        pub fn next(self: *Iterator) ?*c.IndexEntry {
+            while (self.pos < self.index.c_index.capacity) {
+                const entry = &self.index.c_index.entries[self.pos];
+                self.pos += 1;
+                
+                if (entry.hash != 0) {
+                    return entry;
+                }
+            }
+            return null;
+        }
+    };
+    
+    pub fn iterator(self: *FastIndex) Iterator {
+        return .{
+            .index = self,
+            .pos = 0,
+        };
     }
 };
 
