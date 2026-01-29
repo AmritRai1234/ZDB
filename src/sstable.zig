@@ -294,7 +294,7 @@ pub const SSTable = struct {
             // Parse entries in current block
             while (self.block_offset + 8 < block.len) {
                 const key_len = std.mem.readInt(u32, block[self.block_offset..][0..4], .little);
-                const value_len = std.mem.readInt(u32, block[self.block_offset + 4..][0..8], .little);
+                const value_len = std.mem.readInt(u32, block[self.block_offset + 4..][0..4], .little);
                 self.block_offset += 8;
                 
                 if (self.block_offset + key_len + value_len > block.len) {
