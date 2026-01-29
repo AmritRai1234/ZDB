@@ -135,17 +135,22 @@ pub const SSTable = struct {
         var index = SparseIndex.init(allocator);
         errdefer index.deinit();
         
-        const num_index_entries = try file.reader().readInt(u64, .little);
+        var buf: [8]u8 = undefined;
+        try file.readNoEof(&buf);
+        const num_index_entries = std.mem.readInt(u64, &buf, .little);
         var i: usize = 0;
         while (i < num_index_entries) : (i += 1) {
-            const key_len = try file.reader().readInt(u32, .little);
+            var key_len_buf: [4]u8 = undefined;
+            try file.readNoEof(&key_len_buf);
+            const key_len = std.mem.readInt(u32, &key_len_buf, .little);
             const key = try allocator.alloc(u8, key_len);
             errdefer allocator.free(key);
             
-            try file.reader().readNoEof(key);
-            const offset = try file.reader().readInt(u64, .little);
+            try file.readNoEof(key);
+            try file.readNoEof(&buf);
+            const offset = std.mem.readInt(u64, &buf, .little);
             
-            try index.entries.append(.{
+            try index.entries.append(allocator, .{
                 .key = key,
                 .offset = offset,
             });
@@ -155,7 +160,23 @@ pub const SSTable = struct {
         var bloom_filter: ?bloom.BloomFilter = null;
         if (header.bloom_offset > 0) {
             try file.seekTo(header.bloom_offset);
-            bloom_filter = try bloom.BloomFilter.deserialize(allocator, file.reader());
+            // Read bloom filter metadata
+            try file.readNoEof(&buf);
+            const num_bits = std.mem.readInt(u64, &buf, .little);
+            try file.readNoEof(&buf);
+            const num_hashes = std.mem.readInt(u64, &buf, .little);
+            
+            const num_blocks = num_bits / 512;
+            var bf = try bloom.BloomFilter.init(allocator, num_blocks * 100, num_hashes); // Approximate
+            errdefer bf.deinit();
+            
+            // Read bloom filter data
+            const blocks_bytes = try allocator.alloc(u8, num_blocks * @sizeOf(bloom.BloomFilter.Block));
+            defer allocator.free(blocks_bytes);
+            try file.readNoEof(blocks_bytes);
+            @memcpy(std.mem.sliceAsBytes(bf.blocks), blocks_bytes);
+            
+            bloom_filter = bf;
         }
         
         return .{
