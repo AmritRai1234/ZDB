@@ -70,7 +70,7 @@ pub const SSTable = struct {
         
         fn init(allocator: Allocator) SparseIndex {
             return .{
-                .entries = std.ArrayList(IndexEntry).init(allocator),
+                .entries = std.ArrayList(IndexEntry){},
                 .allocator = allocator,
             };
         }
@@ -387,8 +387,8 @@ pub const SSTableWriter = struct {
         var sparse_index = SSTable.SparseIndex.init(self.allocator);
         defer sparse_index.deinit();
         
-        var current_block = std.ArrayList(u8).init(self.allocator);
-        defer current_block.deinit();
+        var current_block = std.ArrayList(u8){};
+        defer current_block.deinit(self.allocator);
         
         var block_count: u32 = 0;
         var entries_in_block: usize = 0;
