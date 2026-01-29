@@ -86,7 +86,7 @@ pub const SSTable = struct {
             const key_copy = try self.allocator.dupe(u8, key);
             errdefer self.allocator.free(key_copy);
             
-            try self.entries.append(.{
+            try self.entries.append(self.allocator, .{
                 .key = key_copy,
                 .offset = offset,
             });
