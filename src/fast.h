@@ -190,4 +190,50 @@ static inline void *mempool_alloc(MemPool *pool, size_t size) {
 
 static inline void mempool_reset(MemPool *pool) { pool->used = 0; }
 
+// Memory-mapped file for zero-copy reads
+typedef struct {
+  void *addr;
+  size_t size;
+  int fd;
+} MappedFile;
+
+// Map entire file into memory for zero-copy access
+static inline MappedFile *mmap_file(int fd) {
+  // Get file size
+  off_t size = lseek(fd, 0, SEEK_END);
+  if (size == -1)
+    return NULL;
+
+  // Map file into memory
+  void *addr = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
+  if (addr == MAP_FAILED)
+    return NULL;
+
+  // Advise kernel about access pattern
+  madvise(addr, size, MADV_RANDOM); // Random access pattern
+
+  MappedFile *mf = (MappedFile *)malloc(sizeof(MappedFile));
+  mf->addr = addr;
+  mf->size = size;
+  mf->fd = fd;
+
+  return mf;
+}
+
+// Unmap file
+static inline void munmap_file(MappedFile *mf) {
+  if (mf) {
+    munmap(mf->addr, mf->size);
+    free(mf);
+  }
+}
+
+// Zero-copy read from mapped file
+static inline const void *mmap_read(MappedFile *mf, uint64_t offset,
+                                    size_t size) {
+  if (offset + size > mf->size)
+    return NULL;
+  return (const char *)mf->addr + offset;
+}
+
 #endif // ZMDB_FAST_H
