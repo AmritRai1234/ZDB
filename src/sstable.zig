@@ -430,11 +430,12 @@ pub const SSTableWriter = struct {
         
         // Write sparse index
         const index_offset = try self.file.getPos();
-        try self.file.writeInt(u64, sparse_index.entries.items.len, .little);
+        const file_writer = self.file.writer();
+        try file_writer.writeInt(u64, sparse_index.entries.items.len, .little);
         for (sparse_index.entries.items) |entry| {
-            try self.file.writeInt(u32, @intCast(entry.key.len), .little);
+            try file_writer.writeInt(u32, @intCast(entry.key.len), .little);
             try self.file.writeAll(entry.key);
-            try self.file.writeInt(u64, entry.offset, .little);
+            try file_writer.writeInt(u64, entry.offset, .little);
         }
         
         // Write bloom filter
