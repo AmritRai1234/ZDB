@@ -153,19 +153,21 @@ pub const Database = struct {
         const wal_file = self.wal orelse return error.Corruption;
         const fd = wal_file.handle;
         
-        // Calculate total read size
+        // Read header first to get key length
         const header_size = @sizeOf(RecordHeader);
-        const total_size = header_size + entry.size;
+        var header_buf: [@sizeOf(RecordHeader)]u8 align(@alignOf(RecordHeader)) = undefined;
+        const header_bytes = try std.posix.pread(fd, &header_buf, entry.offset);
+        if (header_bytes != header_size) return error.Corruption;
         
-        // Single pread syscall for header + key + value (FAST!)
+        const header = std.mem.bytesAsValue(RecordHeader, &header_buf).*;
+        
+        // Now read the full record (header + key + value)
+        const total_size = header_size + header.key_len + header.value_len;
         var read_buf = try allocator.alloc(u8, total_size);
         defer allocator.free(read_buf);
         
         const bytes_read = try std.posix.pread(fd, read_buf, entry.offset);
         if (bytes_read != total_size) return error.Corruption;
-        
-        // Parse header
-        const header = @as(*const RecordHeader, @ptrCast(@alignCast(read_buf.ptr))).*;
         
         // Extract value (skip header + key)
         const value_offset = header_size + header.key_len;
