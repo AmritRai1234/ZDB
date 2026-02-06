@@ -178,6 +178,26 @@ pub fn build(b: *std.Build) void {
     const hybrid_bench_step = b.step("bench-hybrid", "Run hybrid architecture benchmark");
     hybrid_bench_step.dependOn(&hybrid_bench_cmd.step);
     
+    // Benchmark: Turbo 10x Performance
+    const turbo_bench_module = b.createModule(.{
+        .root_source_file = b.path("src/bench_turbo.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    
+    const turbo_bench = b.addExecutable(.{
+        .name = "zmdb-turbo-bench",
+        .root_module = turbo_bench_module,
+    });
+    turbo_bench.linkLibC();
+    turbo_bench.linkSystemLibrary("lz4");
+    turbo_bench.addIncludePath(b.path("src"));
+    b.installArtifact(turbo_bench);
+    
+    const turbo_bench_cmd = b.addRunArtifact(turbo_bench);
+    const turbo_bench_step = b.step("bench-turbo", "Run 10x TurboDatabase performance benchmark");
+    turbo_bench_step.dependOn(&turbo_bench_cmd.step);
+    
     // Debug tool
     const debug_module = b.createModule(.{
         .root_source_file = b.path("src/debug_db.zig"),
@@ -251,4 +271,72 @@ pub fn build(b: *std.Build) void {
     
     const wasm_step = b.step("build-wasm", "Build WebAssembly module");
     wasm_step.dependOn(&wasm_install.step);
+    
+    // Turbo WebAssembly build (10x performance)
+    const turbo_wasm_module = b.createModule(.{
+        .root_source_file = b.path("src/turbo_wasm.zig"),
+        .target = wasm_target,
+        .optimize = .ReleaseFast,
+    });
+    
+    const turbo_wasm_lib = b.addExecutable(.{
+        .name = "turbo_wasm",
+        .root_module = turbo_wasm_module,
+    });
+    
+    turbo_wasm_lib.entry = .disabled;
+    turbo_wasm_lib.rdynamic = true;
+    
+    const turbo_wasm_install = b.addInstallArtifact(turbo_wasm_lib, .{
+        .dest_dir = .{ .override = .{ .custom = "wasm" } },
+    });
+    
+    const turbo_wasm_step = b.step("build-turbo-wasm", "Build TurboDatabase WebAssembly module");
+    turbo_wasm_step.dependOn(&turbo_wasm_install.step);
+    
+    // Standard benchmark (db_bench style)
+    const std_bench_module = b.createModule(.{
+        .root_source_file = b.path("src/bench_standard.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    std_bench_module.addImport("turbo_index", b.createModule(.{
+        .root_source_file = b.path("src/turbo_index.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    }));
+    
+    const std_bench_exe = b.addExecutable(.{
+        .name = "db_bench",
+        .root_module = std_bench_module,
+    });
+    b.installArtifact(std_bench_exe);
+    
+    const std_bench_run = b.addRunArtifact(std_bench_exe);
+    const std_bench_step = b.step("db-bench", "Run standard db_bench style benchmark");
+    std_bench_step.dependOn(&std_bench_run.step);
+    
+    // YCSB Benchmark (industry standard)
+    const ycsb_module = b.createModule(.{
+        .root_source_file = b.path("src/ycsb_bench.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    ycsb_module.addImport("turbo_database", b.createModule(.{
+        .root_source_file = b.path("src/turbo_database.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    }));
+    
+    const ycsb_exe = b.addExecutable(.{
+        .name = "ycsb",
+        .root_module = ycsb_module,
+    });
+    ycsb_exe.linkLibC();
+    ycsb_exe.linkSystemLibrary("lz4");
+    b.installArtifact(ycsb_exe);
+    
+    const ycsb_run = b.addRunArtifact(ycsb_exe);
+    const ycsb_step = b.step("ycsb", "Run YCSB (Yahoo Cloud Serving Benchmark)");
+    ycsb_step.dependOn(&ycsb_run.step);
 }

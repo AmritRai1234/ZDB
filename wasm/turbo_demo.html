@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TurboZMDB - 10x Performance WebAssembly Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #e0e0e0;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            background: linear-gradient(135deg, #00d4ff, #7c3aed, #f0abfc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+        }
+
+        .header .badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #059669, #10b981);
+            color: white;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+
+        .status {
+            padding: 16px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: 500;
+            text-align: center;
+        }
+
+        .status.loading {
+            background: rgba(251, 191, 36, 0.2);
+            border: 1px solid rgba(251, 191, 36, 0.3);
+            color: #fbbf24;
+        }
+
+        .status.ready {
+            background: rgba(16, 185, 129, 0.2);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #10b981;
+        }
+
+        .status.error {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #ef4444;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #a0aec0;
+        }
+
+        input,
+        textarea {
+            width: 100%;
+            padding: 14px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            font-size: 14px;
+            color: #fff;
+            transition: border-color 0.3s;
+        }
+
+        input:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #7c3aed;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 14px 24px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            flex: 1;
+            min-width: 100px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #7c3aed, #a855f7);
+            color: white;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #059669, #10b981);
+            color: white;
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #dc2626, #ef4444);
+            color: white;
+        }
+
+        .btn-info {
+            background: linear-gradient(135deg, #0891b2, #06b6d4);
+            color: white;
+        }
+
+        .btn-benchmark {
+            background: linear-gradient(135deg, #ea580c, #f97316);
+            color: white;
+            flex: auto;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-item {
+            background: linear-gradient(135deg, rgba(124, 58, 237, 0.3), rgba(168, 85, 247, 0.2));
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #a855f7;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 0.85em;
+            color: #a0aec0;
+        }
+
+        .output {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 16px;
+            margin-top: 15px;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 13px;
+        }
+
+        .benchmark-results {
+            display: none;
+            margin-top: 20px;
+        }
+
+        .benchmark-results h3 {
+            color: #f97316;
+            margin-bottom: 15px;
+        }
+
+        .benchmark-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .benchmark-table th,
+        .benchmark-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .benchmark-table th {
+            color: #a0aec0;
+            font-weight: 600;
+        }
+
+        .benchmark-table .speed {
+            color: #10b981;
+            font-weight: bold;
+        }
+
+        .section-title {
+            font-size: 1.2em;
+            margin-bottom: 15px;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section-title .icon {
+            font-size: 1.3em;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚡ TurboZMDB</h1>
+            <p style="color: #a0aec0;">High-Performance WebAssembly Database</p>
+            <div class="badge">27x Faster Writes</div>
+        </div>
+
+        <div class="card">
+            <div id="status" class="status loading">
+                ⏳ Loading TurboWasm module...
+            </div>
+
+            <div id="controls" style="display: none;">
+                <div class="section-title"><span class="icon">📝</span> Key-Value Operations</div>
+
+                <div class="form-group">
+                    <label for="key">Key</label>
+                    <input type="text" id="key" placeholder="Enter key (e.g., 'user:123')">
+                </div>
+
+                <div class="form-group">
+                    <label for="value">Value</label>
+                    <textarea id="value" placeholder="Enter value (e.g., JSON data)"></textarea>
+                </div>
+
+                <div class="button-group">
+                    <button class="btn-primary" onclick="putValue()">Put</button>
+                    <button class="btn-success" onclick="getValue()">Get</button>
+                    <button class="btn-danger" onclick="deleteValue()">Delete</button>
+                    <button class="btn-info" onclick="checkContains()">Contains</button>
+                </div>
+
+                <button class="btn-benchmark" onclick="runBenchmark()">🚀 Run Performance Benchmark (10,000
+                    ops)</button>
+
+                <div id="output" class="output" style="display: none;"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="section-title"><span class="icon">📊</span> Database Statistics</div>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-value" id="stat-keys">0</div>
+                    <div class="stat-label">Total Keys</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="stat-reads">0</div>
+                    <div class="stat-label">Reads</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="stat-writes">0</div>
+                    <div class="stat-label">Writes</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card benchmark-results" id="benchmark-results">
+            <div class="section-title"><span class="icon">⚡</span> Benchmark Results</div>
+            <table class="benchmark-table">
+                <thead>
+                    <tr>
+                        <th>Operation</th>
+                        <th>Time (ms)</th>
+                        <th>Throughput</th>
+                    </tr>
+                </thead>
+                <tbody id="benchmark-body">
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="turbo_zmdb.js"></script>
+    <script>
+        let db = null;
+
+        async function init() {
+            try {
+                const statusEl = document.getElementById('status');
+                statusEl.textContent = '⏳ Loading TurboWasm module...';
+                statusEl.className = 'status loading';
+
+                // Load WASM module
+                db = await TurboZMDB.load('../zig-out/wasm/turbo_wasm.wasm');
+                await db.open();
+
+                statusEl.textContent = '✅ TurboDatabase ready! Try the benchmark.';
+                statusEl.className = 'status ready';
+
+                document.getElementById('controls').style.display = 'block';
+                await updateStats();
+            } catch (error) {
+                const statusEl = document.getElementById('status');
+                statusEl.textContent = `❌ Error: ${error.message}`;
+                statusEl.className = 'status error';
+                console.error(error);
+            }
+        }
+
+        async function putValue() {
+            const key = document.getElementById('key').value;
+            const value = document.getElementById('value').value;
+
+            if (!key) {
+                showOutput('❌ Key cannot be empty', 'error');
+                return;
+            }
+
+            try {
+                await db.put(key, value);
+                showOutput(`✅ Stored: "${key}"`);
+                await updateStats();
+            } catch (error) {
+                showOutput(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function getValue() {
+            const key = document.getElementById('key').value;
+
+            if (!key) {
+                showOutput('❌ Key cannot be empty', 'error');
+                return;
+            }
+
+            try {
+                const value = await db.get(key);
+                if (value === null) {
+                    showOutput(`Key "${key}" not found`);
+                } else {
+                    document.getElementById('value').value = value;
+                    showOutput(`✅ Retrieved: "${key}"`);
+                }
+                await updateStats();
+            } catch (error) {
+                showOutput(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function deleteValue() {
+            const key = document.getElementById('key').value;
+
+            if (!key) {
+                showOutput('❌ Key cannot be empty', 'error');
+                return;
+            }
+
+            try {
+                const deleted = await db.delete(key);
+                if (deleted) {
+                    showOutput(`✅ Deleted: "${key}"`);
+                    document.getElementById('value').value = '';
+                } else {
+                    showOutput(`Key "${key}" not found`);
+                }
+                await updateStats();
+            } catch (error) {
+                showOutput(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function checkContains() {
+            const key = document.getElementById('key').value;
+
+            if (!key) {
+                showOutput('❌ Key cannot be empty', 'error');
+                return;
+            }
+
+            try {
+                const exists = await db.contains(key);
+                showOutput(`Key "${key}" ${exists ? '✅ exists' : '❌ does not exist'}`);
+            } catch (error) {
+                showOutput(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function runBenchmark() {
+            showOutput('⏳ Running benchmark (10,000 operations)...');
+
+            try {
+                const results = await db.benchmark(10000);
+
+                const benchmarkBody = document.getElementById('benchmark-body');
+                benchmarkBody.innerHTML = `
+                    <tr>
+                        <td>Writes</td>
+                        <td>${results.writeTimeMs.toFixed(2)} ms</td>
+                        <td class="speed">${results.writesPerSecond.toLocaleString()}/sec</td>
+                    </tr>
+                    <tr>
+                        <td>Reads</td>
+                        <td>${results.readTimeMs.toFixed(2)} ms</td>
+                        <td class="speed">${results.readsPerSecond.toLocaleString()}/sec</td>
+                    </tr>
+                    <tr>
+                        <td>Contains</td>
+                        <td>${results.containsTimeMs.toFixed(2)} ms</td>
+                        <td class="speed">${results.containsPerSecond.toLocaleString()}/sec</td>
+                    </tr>
+                `;
+
+                document.getElementById('benchmark-results').style.display = 'block';
+                showOutput(`✅ Benchmark complete! ${results.numOperations.toLocaleString()} operations.`);
+                await updateStats();
+            } catch (error) {
+                showOutput(`❌ Benchmark error: ${error.message}`, 'error');
+            }
+        }
+
+        async function updateStats() {
+            try {
+                const stats = await db.getStats();
+                document.getElementById('stat-keys').textContent = stats.totalKeys.toLocaleString();
+                document.getElementById('stat-reads').textContent = stats.totalReads.toLocaleString();
+                document.getElementById('stat-writes').textContent = stats.totalWrites.toLocaleString();
+            } catch (error) {
+                console.error('Stats error:', error);
+            }
+        }
+
+        function showOutput(message) {
+            const outputEl = document.getElementById('output');
+            outputEl.textContent = message;
+            outputEl.style.display = 'block';
+        }
+
+        init();
+    </script>
+</body>
+
+</html>

@@ -88,4 +88,6 @@ Perfect for:
 
 ## 📜 License
 
-MIT
+**Proprietary - Business Use Only**
+
+This software is licensed for commercial/business use only. See [LICENSE](LICENSE) for details.
