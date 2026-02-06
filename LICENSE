@@ -1,31 +1,64 @@
-ZDB Proprietary License
+ZDB Dual License
 
 Copyright (c) 2026 Amrit Rai. All Rights Reserved.
 
-BUSINESS USE ONLY LICENSE
+================================================================================
+                              DUAL LICENSE MODEL
+================================================================================
 
-This software and associated documentation files (the "Software") are proprietary 
-and confidential. The Software is licensed, not sold.
+ZDB is available under two licensing options:
 
-PERMITTED USE:
-- Use of this Software is permitted ONLY for commercial/business purposes
-- Licensees must obtain a valid commercial license from the copyright holder
-- Internal business use within a licensed organization
+================================================================================
+OPTION 1: APACHE LICENSE 2.0 (Free)
+================================================================================
 
-RESTRICTIONS:
-- No redistribution, sublicensing, or sharing of the Software
-- No modification or creation of derivative works without written permission
-- No reverse engineering, decompilation, or disassembly
-- No use for open source projects
-- No personal or non-commercial use without explicit permission
+For the following uses, ZDB is licensed under the Apache License, Version 2.0:
 
-DISCLAIMER:
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, 
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
-SOFTWARE.
+✅ Open source projects (must be OSI-approved license)
+✅ Non-profit organizations
+✅ Educational and academic use
+✅ Personal projects
+✅ Evaluation and testing
 
-For licensing inquiries, contact the copyright holder.
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+================================================================================
+OPTION 2: COMMERCIAL LICENSE (Paid)
+================================================================================
+
+For commercial use by for-profit companies, a commercial license is required:
+
+💼 For-profit companies using ZDB in production
+💼 Commercial products that include ZDB
+💼 SaaS/Cloud services powered by ZDB
+💼 Proprietary/closed-source applications
+
+PRICING:
+- Small Business (< 10 employees):  Contact for pricing
+- Enterprise (10+ employees):       Contact for pricing
+- OEM/Embedded licensing:           Contact for pricing
+
+For commercial licensing inquiries, contact: [Your Contact Info]
+
+================================================================================
+                              WHICH LICENSE APPLIES?
+================================================================================
+
+If you are:
+- An open source project with OSI-approved license → Apache 2.0 (Free)
+- A non-profit organization → Apache 2.0 (Free)
+- A university or educational institution → Apache 2.0 (Free)
+- An individual for personal use → Apache 2.0 (Free)
+- A for-profit company → Commercial License Required
+
+When in doubt, contact us for clarification.
