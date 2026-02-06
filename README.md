@@ -1,8 +1,10 @@
-# 🔋 ZDB - Ultra-Fast Embedded Database
+# 🔋 ZDB - Ultra-Fast Battery-First Database
 
 **1.5x faster than RocksDB** | Zero dependencies | Battery-optimized
 
 [![License](https://img.shields.io/badge/License-Dual%20(Apache%202.0%20%2B%20Commercial)-blue.svg)](LICENSE)
+
+ZDB is built from the ground up with a unique vision: **optimize for battery life first, speed second**. It delivers excellent performance while being smart about power consumption.
 
 ## ⚡ Performance (YCSB Benchmark)
 
@@ -16,13 +18,36 @@ Tested head-to-head against RocksDB 9.10 on the same machine:
 | **C (100% Read)** | 359K ops/sec | 235K ops/sec | **ZDB 1.52x faster** |
 | **F (Read-Mod-Write)** | 247K ops/sec | 162K ops/sec | **ZDB 1.52x faster** |
 
-Run benchmarks yourself:
 ```bash
 zig build ycsb              # ZDB YCSB benchmark
 ./bench/rocksdb_bench       # RocksDB comparison
 ```
 
-## 🚀 Quick Start
+## 🎯 Philosophy
+
+Traditional databases optimize for raw throughput. ZDB optimizes for:
+- **Battery efficiency** - Adaptive power modes, write batching, minimal wake-ups
+- **Storage efficiency** - LZ4/zstd compression (40-70% savings)
+- **Developer experience** - Simple, clean API with powerful features
+
+## ✨ Features
+
+### 🔋 Battery-First Design
+- Adaptive power modes (aggressive → balanced → ultra_saver)
+- Write batching reduces syscalls and wake-ups
+- Lock-free sharded index (64 shards)
+
+### ⚡ Zero-Copy Performance
+- Memory-mapped I/O for instant reads
+- `getInto()` for zero-allocation reads (3.8M ops/sec)
+- `getBorrowed()` for borrowed slices
+
+### � Storage Efficiency
+- Built-in LZ4 compression
+- Compact WAL format
+- Efficient index structure
+
+## �🚀 Quick Start
 
 ```zig
 const TurboDatabase = @import("turbo_database.zig").TurboDatabase;
@@ -38,21 +63,10 @@ var buf: [1024]u8 = undefined;
 const len = try db.getInto("user:123", &buf);
 // buf[0..len] contains "Alice" - no allocation!
 
-// Batch write (highest throughput)
-try db.putBatch(&[_]KV{
-    .{ .key = "a", .value = "1" },
-    .{ .key = "b", .value = "2" },
-});
+// Zero-copy read (borrowed from mmap)
+const borrowed = try db.getBorrowed("user:123");
+// Don't free borrowed slices!
 ```
-
-## ✨ Features
-
-- **Lock-free sharded index** - 64 shards for concurrent access
-- **Zero-copy reads** - `getInto()` reads directly into your buffer
-- **Batch API** - High-throughput bulk operations
-- **LZ4 compression** - Optional transparent compression
-- **WebAssembly support** - Runs in the browser
-- **Battery-optimized** - Adaptive power modes, write batching
 
 ## 🛠️ Building
 
@@ -66,11 +80,11 @@ zig build build-turbo-wasm  # WebAssembly build
 
 ## 🎯 Use Cases
 
-- Mobile apps (iOS, Android via FFI)
-- Embedded systems
+- Mobile applications (iOS, Android via FFI)
+- Embedded systems & IoT
+- Battery-powered devices
 - WebAssembly applications
 - High-performance caching
-- Any app needing fast key-value storage
 
 ## 📜 License
 
